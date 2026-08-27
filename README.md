@@ -7,7 +7,7 @@ and **published to npm on its own** — this repository is the workspace, not th
 
 | Package | What it does |
 |---|---|
-| [`pi-viewport-mouse`](packages/viewport-mouse) | Resolves TUI mouse clicks to the transcript components under them and publishes them as events other extensions can subscribe to. |
+| [`pi-viewport-mouse`](packages/viewport-mouse) | Resolves TUI mouse clicks to the transcript components under them and publishes them as events other extensions can subscribe to. Requires Pi's fullscreen TUI mode. |
 
 ## Install
 

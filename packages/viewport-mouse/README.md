@@ -7,6 +7,21 @@ components in your transcript. This extension resolves a click to the components
 publishes it as an event. It performs **no UI action of its own** — other extensions subscribe and
 decide what a click means.
 
+> ### ⚠️ Requires Pi's fullscreen TUI mode, which is not the default
+>
+> Pi only captures mouse input in its fullscreen (alternate-screen) TUI. The regular inline TUI has no
+> mouse handling whatsoever, so **this extension does nothing until you switch modes**:
+>
+> ```bash
+> pi --tui-mode fullscreen
+> ```
+>
+> To make it permanent, set `"tuiMode": "fullscreen"` in `~/.pi/agent/settings.json`, or change it
+> through `/settings` — that applies immediately, without a restart.
+>
+> Fullscreen mode is marked experimental by Pi. Once you are in it, mouse capture is always on; there
+> is no separate mouse setting to enable.
+
 ```
       click at (x, y)
             │
@@ -32,6 +47,7 @@ that mapping.
 
 ```bash
 pi install npm:pi-viewport-mouse
+pi --tui-mode fullscreen          # required — see the note above
 ```
 
 On its own it does nothing visible — install it alongside an extension that subscribes, or write one.
@@ -157,8 +173,22 @@ component type is being measured wrongly and is worth reporting.
 
 ## Requirements
 
-Node 20 or newer, and a Pi version that provides `@earendil-works/pi-tui`. Mouse capture only exists
-in Pi's fullscreen alternate-screen TUI, so clicks do nothing in the inline TUI.
+- **Node 20 or newer.**
+- **Pi running in fullscreen TUI mode** (`--tui-mode fullscreen`, or `"tuiMode": "fullscreen"` in
+  settings). This is not Pi's default. `createInteractiveTui` only builds a `TuiAltScreen` in
+  fullscreen mode; the regular `TuiMainScreen` contains no mouse handling at all, so there is nothing
+  to hook. Nothing breaks in regular mode — clicks simply never reach a subscriber.
+
+## Troubleshooting
+
+**Nothing happens when I click.** Almost always fullscreen mode. Confirm with `/settings` that
+`tuiMode` is `fullscreen`. Also check that an extension is actually subscribed — this package only
+publishes events, so with no subscribers it deliberately does nothing at all and skips the work
+entirely.
+
+**Clicks work but hit the wrong block.** Set `PI_VIEWPORT_MOUSE_DEBUG=1` and look for a
+`height mismatch` line in `/tmp/pi-viewport-mouse.log`. That means a component type is measuring
+wrongly; please open an issue with the line, since it names the widths involved.
 
 ## License
 

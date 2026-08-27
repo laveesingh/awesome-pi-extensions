@@ -1,7 +1,7 @@
 {
   "name": "pi-viewport-mouse",
-  "version": "0.1.0",
-  "description": "Mouse click routing for the Pi coding agent TUI. Resolves alt-screen clicks to the transcript components under them and publishes them as events other extensions can subscribe to.",
+  "version": "0.1.1",
+  "description": "Mouse click routing for the Pi coding agent. Resolves clicks to the transcript components under them and publishes them as events other extensions can subscribe to. Requires Pi's fullscreen TUI mode, which is not the default.",
   "type": "module",
   "main": "./index.ts",
   "exports": {

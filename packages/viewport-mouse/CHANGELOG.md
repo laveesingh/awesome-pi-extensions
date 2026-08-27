@@ -3,6 +3,16 @@
 All notable changes to `pi-viewport-mouse` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-08-27
+
+Documentation only; no code changes.
+
+- Make the fullscreen TUI requirement prominent. Pi's `tuiMode` defaults to `"regular"`, whose
+  `TuiMainScreen` has no mouse handling at all, so the extension does nothing until you run
+  `pi --tui-mode fullscreen` or set `"tuiMode": "fullscreen"`. This was previously a single line at
+  the end of the README and absent from the package description entirely.
+- Add a troubleshooting section covering the silent-no-op case and `height mismatch` diagnostics.
+
 ## [0.1.0] — 2026-08-27
 
 Initial release.
