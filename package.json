@@ -1,0 +1,39 @@
+{
+  "name": "awesome-pi-extensions",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Extensions for the Pi coding agent. Each package under packages/ is published to npm on its own.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "pi-coding-agent"
+  ],
+  "author": "laveesingh",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laveesingh/awesome-pi-extensions.git"
+  },
+  "bugs": {
+    "url": "https://github.com/laveesingh/awesome-pi-extensions/issues"
+  },
+  "homepage": "https://github.com/laveesingh/awesome-pi-extensions#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "pi": {
+    "extensions": [
+      "packages/*/index.ts"
+    ]
+  }
+}
