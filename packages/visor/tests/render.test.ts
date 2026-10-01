@@ -38,11 +38,11 @@ const nativeDefinitions: Record<string, Definition> = {
   find: Pi.createFindToolDefinition(process.cwd()),
 };
 
-function component(name: string, args: unknown, definition: Definition | null = nativeDefinitions[name], cwd = process.cwd()) {
+function component(name: string, args: unknown, definition: Definition | null = nativeDefinitions[name], cwd = process.cwd(), live = true) {
   const c = new Pi.ToolExecutionComponent(name, `${name}-1`, args, {}, definition ?? undefined, ui, cwd);
   c.updateArgs(args);
   c.setArgsComplete();
-  c.markExecutionStarted();
+  if (live) c.markExecutionStarted();
   return c;
 }
 
@@ -211,7 +211,64 @@ test("real Pi 0.99 edit execution keeps its native diff, two collapsed lines, an
       assert.ok(content(c).some((l) => /\+.*after/.test(l)), "native component must survive invalidation");
       c.setExpanded(false);
     }
+    const rebuilt = component("edit", args, definition, cwd, false);
+    rebuilt.updateResult({ ...result, isError: false });
+    assert.equal(footerOf(content(rebuilt)).trim(), "↳ 1 line (ctrl+o)");
+    assert.equal(content(rebuilt).length, 2);
+    rebuilt.setExpanded(true);
+    const restoredDiff = content(rebuilt);
+    assert.ok(restoredDiff.some((line) => /-.*before/.test(line)), restoredDiff.join("\n"));
+    assert.ok(restoredDiff.some((line) => /\+.*after/.test(line)), restoredDiff.join("\n"));
+    assert.ok(!restoredDiff.some((line) => /•|^\s*—|\d+ms\b/.test(line)), restoredDiff.join("\n"));
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("live generic and passthrough clocks start only when execution starts", (t) => {
+  let now = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => now);
+  for (const [name, args] of [["future_tool", {}], ["read", { path: "fixture.txt" }]] as const) {
+    const c = component(name, args, nativeDefinitions[name], process.cwd(), false);
+    // Construction and argument rendering precede live execution. They must not
+    // consume the five seconds before Pi marks this execution as started.
+    now += 5000;
+    c.markExecutionStarted();
+    now += 1250;
+    c.updateResult({ content: [{ type: "text", text: "body one\nbody two" }], isError: false });
+    const collapsedFooter = footerOf(content(c));
+    assert.match(collapsedFooter, /↳ 2 lines • \d\d:\d\d:\d\d • 1\.25s \(ctrl\+o\)$/);
+    now += 10000;
+    c.setExpanded(true);
+    const expanded = content(c);
+    assert.match(expanded.at(-1)!, /— \d\d:\d\d:\d\d • 1\.25s$/);
+    c.setExpanded(false);
+    assert.equal(footerOf(content(c)), collapsedFooter, name);
+  }
+});
+
+test("rebuilt generic and passthrough blocks omit unavailable timing in both views", () => {
+  for (const [name, args] of [["future_tool", {}], ["read", { path: "fixture.txt" }]] as const) {
+    const c = component(name, args, nativeDefinitions[name], process.cwd(), false);
+    c.updateResult({ content: [{ type: "text", text: "body one\nbody two" }], isError: false });
+    for (let i = 0; i < 3; i++) {
+      assert.equal(footerOf(content(c)).trim(), "↳ 2 lines (ctrl+o)");
+      c.setExpanded(true);
+      const expanded = content(c);
+      assert.ok(expanded.some((line) => line.trim() === "body two"), expanded.join("\n"));
+      assert.ok(!expanded.some((line) => /•|\d\d:\d\d:\d\d|\d+(?:\.\d+)?(?:ms|s)\b|^\s*—/.test(line)), expanded.join("\n"));
+      c.invalidate();
+      c.setExpanded(false);
+    }
+  }
+});
+
+test("rebuilt passthrough raw fallback omits the invented 0ms footer", () => {
+  for (const renderResult of [undefined, () => { throw new Error("native renderer fixture failure"); }]) {
+    const c = component("read", {}, { renderCall: () => new Text("native read", 0, 0), renderResult }, process.cwd(), false);
+    c.updateResult({ content: [{ type: "text", text: "raw body" }], isError: false });
+    assert.equal(footerOf(content(c)).trim(), "↳ 1 line (ctrl+o)");
+    c.setExpanded(true);
+    assert.deepEqual(content(c).map((line) => line.trim()), ["native read", "raw body"]);
+  }
 });
 
 test("duration freezes when the result settles", async () => {

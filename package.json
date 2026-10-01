@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/laveesingh/awesome-pi-extensions#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "pi": {
     "extensions": [

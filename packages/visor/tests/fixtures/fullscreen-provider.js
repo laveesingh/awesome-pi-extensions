@@ -20,8 +20,14 @@ export default function fullscreenProvider(pi) {
   pi.on("session_start", async (_event, ctx) => {
     if (resolve(ctx.cwd) !== root) throw new Error("Fixture cwd must equal VISOR_SMOKE_ROOT");
     await mkdir(root, { recursive: true });
-    await writeFile(join(root, "read.txt"), "read fixture one\nread fixture two\nread fixture three\n");
-    await writeFile(join(root, "edit.txt"), "unchanged\nbefore fixture\nend\n");
+    // A resume must not overwrite files changed by the real edit execution.
+    for (const [path, content] of [
+      ["read.txt", "read fixture one\nread fixture two\nread fixture three\n"],
+      ["edit.txt", "unchanged\nbefore fixture\nend\n"],
+    ]) {
+      try { await writeFile(join(root, path), content, { flag: "wx" }); }
+      catch (error) { if (error.code !== "EEXIST") throw error; }
+    }
   });
   pi.on("tool_call", async (event) => {
     await appendFile(join(root, "executions.jsonl"), JSON.stringify({ type: "call", name: event.toolName, input: event.input }) + "\n");

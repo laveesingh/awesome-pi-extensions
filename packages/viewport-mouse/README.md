@@ -173,7 +173,7 @@ component type is being measured wrongly and is worth reporting.
 
 ## Requirements
 
-- **Node 20 or newer.**
+- **Node 22.19.0 or newer**, matching Pi 0.99.1.
 - **Pi running in fullscreen TUI mode** (`--tui-mode fullscreen`, or `"tuiMode": "fullscreen"` in
   settings). This is not Pi's default. `createInteractiveTui` only builds a `TuiAltScreen` in
   fullscreen mode; the regular `TuiMainScreen` contains no mouse handling at all, so there is nothing

@@ -54,8 +54,10 @@ export function collapsedBlock(
 export function createCallRenderer(name: string): CallRenderer {
   return (args: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string; bold: (s: string) => string };
-    const ctx = context as { state?: Record<string, unknown> } | undefined;
-    if (ctx?.state && typeof ctx.state.startedAt !== "number") ctx.state.startedAt = Date.now();
+    const ctx = context as { state?: Record<string, unknown>; executionStarted?: boolean } | undefined;
+    if (ctx?.executionStarted === true && ctx.state && typeof ctx.state.startedAt !== "number") {
+      ctx.state.startedAt = Date.now();
+    }
     const summary = toolArgSummary(name, (args as Record<string, unknown>) ?? {});
     let line = t.fg("toolTitle", t.bold(name));
     if (summary) line += ` ${t.fg("accent", summary)}`;
@@ -123,10 +125,11 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
     }
 
     const ts = formatTime(startedAt);
-    const footLine = t.fg("dim", `— ${ts ? ts + " • " : ""}${dur || "0ms"}`);
+    const timing = [ts, dur].filter(Boolean).join(" • ");
+    const footer = timing ? [t.fg("dim", `— ${timing}`)] : [];
     const rawBody = () => (extractToolText(result) || "").split("\n").map((l) => t.fg("dim", l));
     if (!origOut || typeof (origOut as { render?: unknown }).render !== "function") {
-      return new Text([...rawBody(), footLine].join("\n"), 0, 0);
+      return new Text([...rawBody(), ...footer].join("\n"), 0, 0);
     }
     return keepNative({
       render: (width: number) => {
@@ -136,7 +139,7 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
         // the native result can legitimately be empty. Substitute raw text when the
         // expansion would otherwise be empty, so we never hide the output.
         if (lines.every((l) => !stripAnsi(l).trim())) lines = rawBody();
-        return [...lines, footLine];
+        return [...lines, ...footer];
       },
       invalidate() { try { (origOut as { invalidate?: () => void }).invalidate?.(); } catch {} },
     }, origOut);
@@ -144,15 +147,17 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
 }
 
 /**
- * Start the clock when the call line is drawn. Our own call renderer does this
- * inline; passthrough tools keep Pi's call renderer, so it has to be wrapped or
- * every passthrough block reports a 0ms duration.
+ * Start the clock only after Pi marks a live execution as started. Rebuilt
+ * transcript components never receive that mark, so they must not invent a
+ * resume clock or duration. Passthrough calls need the same timing guard.
  */
 export function withTiming(orig: CallRenderer | undefined, selfShell = false): CallRenderer | undefined {
   if (!orig) return orig;
   return (args: unknown, theme: unknown, context: unknown) => {
-    const ctx = context as { state?: Record<string, unknown>; expanded?: boolean } | undefined;
-    if (ctx?.state && typeof ctx.state.startedAt !== "number") ctx.state.startedAt = Date.now();
+    const ctx = context as { state?: Record<string, unknown>; expanded?: boolean; executionStarted?: boolean } | undefined;
+    if (ctx?.executionStarted === true && ctx.state && typeof ctx.state.startedAt !== "number") {
+      ctx.state.startedAt = Date.now();
+    }
     const native = orig(args, theme, nativeContext(context)) as Component;
     return keepNative({
       render(width: number) {

@@ -48,7 +48,7 @@
   },
   "homepage": "https://github.com/laveesingh/awesome-pi-extensions/tree/main/packages/viewport-mouse#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "publishConfig": {
     "access": "public"

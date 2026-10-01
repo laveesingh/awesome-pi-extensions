@@ -15,6 +15,9 @@ All notable changes to `pi-visor` are documented here. This project follows
 - Preserve native renderer component identities through repeated expansion and invalidation.
 - Preserve every text result block, including codemode output after its status header.
 - Require real-component rendering checks to fail if Pi is unavailable instead of skipping.
+- Omit unavailable timestamps and durations on restored tool blocks instead of showing resume-time
+  values. Only live executions start the timing clock.
+- Align workspace Node requirements with Pi 0.99.1: Node 22.19.0 or newer.
 
 ## [0.1.0] — 2026-08-28
 

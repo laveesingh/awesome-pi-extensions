@@ -18,7 +18,8 @@ ticket_get GOL-264
 ↳ GOL-264 · "Compact tool output" · done · spec • 11:51:34 • 179ms (ctrl+o)
 ```
 
-Click a block — or press `ctrl+o` — to expand it.
+Click a block — or press `ctrl+o` — to expand it. Timing is shown only for live executions.
+Restored transcript blocks omit unavailable timestamps and durations in both views.
 
 ## What it does
 
@@ -74,7 +75,7 @@ Neither is required. Without them `ctrl+o` still expands everything, and nothing
 
 ## Requirements
 
-- **Node 22.19 or newer**, as required by Pi 0.99.
+- **Node 22.19.0 or newer**, as required by Pi 0.99.1.
 - **Pi 0.99.1.** This patches Pi internals (see Stability), so a Pi update can break it.
 - **For clicks only:** `pi-viewport-mouse` and Pi's fullscreen TUI, which is *not* Pi's default.
 
