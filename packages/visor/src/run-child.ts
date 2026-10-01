@@ -1,5 +1,5 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Box, type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Box, type Component, type TuiMouseEvent, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { stripAnsi } from "./format.js";
 import { timingParts, type RecordedTiming, type ThemeSource } from "./run-style.js";
 import { ownsTool, setGroupedToolPresentation, type GroupToolPresentation } from "./tool-display.js";
@@ -83,6 +83,12 @@ export class ToolRunChild extends RevisionObserver implements RunChild {
     // Pi prepends a Spacer(1). RunGroup owns the one inter-child gap instead.
     return this.owned && lines.length && !stripAnsi(lines[0]).trim() ? lines.slice(1) : lines;
   }
+  handleMouse(event: TuiMouseEvent): ReturnType<ToolExecutionComponent["handleMouse"]> {
+    const offset = this.owned ? 1 : 0;
+    // RunGroup removes only the native leading Spacer; put it back in the
+    // coordinate space before forwarding to Pi's own MouseRegions.
+    return this.component.handleMouse?.({ ...event, y: event.y + offset, height: event.height + offset });
+  }
   invalidate(): void { this.component.invalidate(); }
   detach(): void {
     this.restore();
@@ -110,6 +116,7 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
   expanded = false;
   private metadata: RecordedTiming;
   private readonly native: AssistantInternals;
+  private thoughtCache?: { width: number; revision: number; rows: Array<{ component: ThoughtLine; start: number; height: number; width: number; x: number }> };
   constructor(readonly component: AssistantMessageComponent, private readonly theme: ThemeSource, timing: RecordedTiming = {}) {
     super();
     this.native = component as unknown as AssistantInternals;
@@ -128,16 +135,8 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
   }
   /** Slice 3 uses these row ranges to retain the thought line's own click meaning. */
   thoughtLayout(width: number): Array<{ component: ThoughtLine; start: number; height: number; width: number; x: number }> {
-    const commentary = this.kind === "note";
-    if (commentary && !this.expanded) return [];
-    const contentWidth = commentary ? Math.max(1, width - 2) : width;
-    let start = commentary ? wrapTextWithAnsi(this.footer(), contentWidth).length + 1 : 0;
-    return this.thoughtLines.map((component) => {
-      const height = component.render(contentWidth).length;
-      const row = { component, start, height, width: contentWidth, x: commentary ? 1 : 0 };
-      start += height;
-      return row;
-    });
+    if (this.thoughtCache?.width !== width || this.thoughtCache.revision !== this.revision) this.render(width);
+    return this.thoughtCache?.rows ?? [];
   }
   private text(): string {
     return (this.native.lastMessage?.content ?? []).filter((block) => block.type === "text" && typeof block.text === "string")
@@ -152,20 +151,32 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
   render(width: number): string[] {
     // Tool-only messages add no row. Thought-only messages expose exactly the
     // existing managed thought component, with its own expansion meaning.
-    if (this.kind === "row") return this.thoughtLines.flatMap((line) => line.render(width));
+    const rows: Array<{ component: ThoughtLine; start: number; height: number; width: number; x: number }> = [];
+    const thoughts = (contentWidth: number, start: number, x: number) => this.thoughtLines.flatMap((component) => {
+      const lines = component.render(contentWidth);
+      rows.push({ component, start, height: lines.length, width: contentWidth, x });
+      start += lines.length;
+      return lines;
+    });
+    if (this.kind === "row") {
+      const lines = thoughts(width, 0, 0);
+      this.thoughtCache = { width, revision: this.revision, rows };
+      return lines;
+    }
     const t = this.theme();
     const text = this.text();
     const header = t.fg("text", t.bold("Commentary") + (text ? ` ${text.split("\n")[0]}` : ""));
     const contentWidth = Math.max(1, width - 2);
     const lines = [truncateToWidth(header, contentWidth, "…"), ...wrapTextWithAnsi(this.footer(), contentWidth)];
     if (this.expanded) {
-      lines.push(...this.thoughtLines.flatMap((line) => line.render(contentWidth)));
+      lines.push(...thoughts(contentWidth, lines.length, 1));
       lines.push(...wrapTextWithAnsi(t.fg("muted", text), contentWidth));
     }
     // Rev 7: commentary uses the same one-cell horizontal shell as tools,
     // with no background or vertical padding.
     const shell = new Box(1, 0);
     shell.addChild({ render: () => lines, invalidate() {} });
+    this.thoughtCache = { width, revision: this.revision, rows };
     return shell.render(width);
   }
   invalidate(): void { this.component.invalidate(); }

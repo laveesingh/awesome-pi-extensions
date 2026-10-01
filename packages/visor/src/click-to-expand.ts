@@ -52,6 +52,10 @@ export class ClickToExpand {
   install(pi: ExtensionAPI): void {
     try {
       this.unsubscribe = viewportMouseRegistry().on(CLICK_HANDLER_KEY, (event) => {
+        // A framed group owns native width/row routing. The legacy walker can
+        // stop at the frame or accidentally descend at document width; either
+        // way defer its entire chain so Pi performs exactly one native toggle.
+        if (event.closest((component) => component.__visorRunGroup === true)) return false;
         const block = event.closest((c) => {
           const comp = c as { setExpanded?: unknown; toolName?: unknown; __visorThoughtLine?: unknown };
           if (typeof comp.setExpanded !== "function") return false;

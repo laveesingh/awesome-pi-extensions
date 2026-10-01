@@ -8,10 +8,11 @@ and **published to npm on its own** — this repository is the workspace, not th
 | Package | What it does |
 |---|---|
 | [`pi-viewport-mouse`](packages/viewport-mouse) | Resolves TUI mouse clicks to the transcript components under them and publishes them as events other extensions can subscribe to. Requires Pi's fullscreen TUI mode. |
-| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses `pi-viewport-mouse` for clicks when present. |
+| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi 0.99 native fullscreen clicks; no mouse extension is required. |
 
-The two are designed to work together but neither depends on the other: `pi-viewport-mouse` only
-publishes click events, and `pi-visor` falls back to keyboard expansion when nothing is publishing.
+The packages can work together but neither depends on the other. Pi 0.99 routes component clicks
+natively, so `pi-visor` run frames work without `pi-viewport-mouse`. The mouse package publishes
+additional click events for consumers. Regular mode remains keyboard-only.
 
 ## Install
 

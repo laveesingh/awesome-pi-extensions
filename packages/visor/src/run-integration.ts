@@ -255,10 +255,12 @@ export class TranscriptGrouping {
     this.pendingRows = [];
   }
   stopPending(components: Iterable<Component>): void {
-    if (!this.active) return;
+    if (!this.active || !this.live || !this.current) return;
+    // D12: an abort belongs only to the currently open user-boundary frame.
+    this.current.group.setMetadata({ outcome: "interrupted" });
     for (const component of components) {
       const frame = this.owners.get(component);
-      if (!frame) continue;
+      if (!frame || frame !== this.current) continue;
       const entry = frame.group.entries.find((child) => child.component === component);
       if (entry instanceof ToolRunChild) entry.setMetadata({ stopped: true });
       frame.group.setMetadata({ outcome: "interrupted" });
@@ -267,9 +269,13 @@ export class TranscriptGrouping {
   finish(): void {
     if (!this.active) return;
     this.refreshLive();
-    for (const frame of this.cycleFrames) { frame.live = false; frame.group.setMetadata({ live: false }); }
+    for (const frame of this.cycleFrames) {
+      frame.live = false;
+      frame.group.setMetadata({ live: false });
+      frame.group.settle();
+    }
     this.live = false;
-    // Slice 3 owns touched/error/interruption-aware auto-collapse, not this seal.
+    // Each frame evaluates its own touched/error/interruption state exactly once.
   }
   private elapsed(frame: FrameRecord): number | undefined {
     return frame.startWall === undefined ? undefined : Math.max(0, this.now() - frame.startWall);
@@ -292,6 +298,10 @@ export class TranscriptGrouping {
     else this.original.removeChild.call(this.chat, component);
     if (this.provisional === component) this.provisional = undefined;
   }
+  nativeChildren(): Component[] {
+    return this.chat.children.flatMap((child) => child instanceof RunGroup ? child.children : [child]);
+  }
+  groupedNativeChildren(): Component[] { return this.frames.flatMap((frame) => frame.group.children); }
   logicalTail(): TranscriptContainer | RunGroup { return this.current?.acceptsRows ? this.current.group : this.chat; }
   insertRow(group: RunGroup, index: number, component: Component): void {
     const child = group.addRow(component);
@@ -421,6 +431,37 @@ export class RunGrouping {
         try { return rebuild.call(mode, items, ...args); }
         finally { controller.rebuilding--; }
       }));
+      const thinking = mode.updateThinkingBlockVisibility;
+      if (typeof thinking === "function") undo.push(replace(mode, "updateThinkingBlockVisibility", (...args: unknown[]) => {
+        const originalChat = mode.chatContainer;
+        mode.chatContainer = { children: controller.nativeChildren() };
+        try { return thinking.apply(mode, args); }
+        finally { mode.chatContainer = originalChat; }
+      }));
+      const paddingDescriptor = Object.getOwnPropertyDescriptor(mode, "outputPad");
+      if (paddingDescriptor && "value" in paddingDescriptor) {
+        let padding = mode.outputPad;
+        Object.defineProperty(mode, "outputPad", { configurable: true, get: () => padding, set: (value: number) => {
+          if (value === padding) return;
+          padding = value;
+          // The original settings callback already updates direct native siblings;
+          // bridge only nested originals and retain D10's fixed group shell.
+          for (const child of controller.groupedNativeChildren()) {
+            if (["AssistantMessageComponent", "CustomMessageComponent", "UserMessageComponent"].includes(name(child))) {
+              (child as unknown as { setOutputPad(value: number): void }).setOutputPad(value);
+            }
+          }
+        } });
+        undo.push(() => Object.defineProperty(mode, "outputPad", { ...paddingDescriptor, value: padding }));
+      }
+      const session = mode.session;
+      if (session && typeof session.abort === "function") {
+        const abort = session.abort;
+        undo.push(replace(session, "abort", (...args: unknown[]) => {
+          controller.stopPending(mode.pendingTools.values());
+          return abort.apply(session, args);
+        }));
+      }
       const status = mode.showStatus;
       undo.push(replace(mode, "showStatus", (...args: unknown[]) => {
         const tail = controller.logicalTail();

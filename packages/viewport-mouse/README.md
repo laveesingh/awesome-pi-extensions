@@ -2,9 +2,8 @@
 
 Mouse click routing for the [Pi coding agent](https://pi.dev) TUI.
 
-Pi captures mouse events for scrolling, text selection and OSC 8 links, but never routes them to the
-components in your transcript. This extension resolves a click to the components underneath it and
-publishes it as an event. It performs **no UI action of its own** — other extensions subscribe and
+Pi 0.99 routes mouse events to components natively. This extension adds a separate event surface:
+it resolves a click to components underneath it and publishes that information to subscribers. It performs **no UI action of its own** — other extensions subscribe and
 decide what a click means.
 
 > ### ⚠️ Requires Pi's fullscreen TUI mode, which is not the default
@@ -32,16 +31,16 @@ decide what a click means.
      resolves the click                                        decides what it means
 ```
 
-## Why it is needed
+## When to use it
 
-Pi's layout engine only creates layout boxes for `ScrollView` and `VStack`/`HStack`. Every other
-component — `Container`, `Box`, `Text`, `ToolExecutionComponent` — renders into *lines* inside a
-parent box, so the whole transcript collapses into a single box holding an array of strings. There is
-no rectangle per block to hit-test against, and the `Component` interface has `render` and
-`handleInput` (keyboard) but no mouse hook.
+Use the event API when a consumer needs the ancestor chain or document row for a click. Pi 0.99's
+`Component.handleMouse` already supports native component actions; a consumer such as `pi-visor`
+does not need this package for its bounded-frame clicks.
 
-So a click gives you a row number and nothing maps that row back to a component. This package rebuilds
-that mapping.
+The event mapping walks rendered lines rather than native component-local mouse regions. Framing
+or width-changing wrappers remain one event target when their child heights do not sum at document
+width. Consumers with their own native geometry should defer these events to Pi's original handler,
+as visor does for grouped clicks. The walker is unchanged by visor's grouping feature.
 
 ## Install
 

@@ -5,6 +5,21 @@ All notable changes to `pi-visor` are documented here. This project follows
 
 ## [Unreleased]
 
+- Group tool runs into bounded two-layer frames; retain native final answers below them, truthful
+  recorded timing on rebuild, and collapsed-state reset on resume/compaction/tree navigation.
+- Add native fullscreen header/child/thought clicks without requiring viewport-mouse; grouped
+  legacy events defer to native routing so the combined configuration toggles once.
+- Cascade Ctrl+O to both layers and later children. Text commentary keeps independent thought
+  controls; thinking-only members retain native reasoning expansion.
+- Collapse each untouched successful frame once at final settlement. Touched, errored or interrupted
+  frames retain exact state; abort labels only the currently open frame. Earlier frames settle normally.
+- Preserve nested thinking/output-padding consumers, custom/status ordering and group-aware cleanup.
+- Render commentary only for visible text; tool-only members add no row/note, and thinking-only
+  members show an uncounted managed thought line. Match one-cell commentary/tool padding and
+  singular counts at one.
+- Add independent frame goldens, real Pi native-order replay, interaction regressions and an offline
+  multistate verification fixture.
+
 - Own every tool by default, including unknown names. Replace the inclusion list with an empty,
   source-level `EXCLUDED` set; exclusions preserve native rendering and take precedence over
   passthrough. No user-facing configuration is added.
