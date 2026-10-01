@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, wrapTextWithAnsi, stripTerminalSequences, type Component } from "@earendil-works/pi-tui";
 import { timingParts, type RecordedTiming } from "./run-style.js";
 import { compactResult, extractToolText, formatTime, notifyOnce, stripAnsi } from "./format.js";
 import { debugLog } from "./pi-modules.js";
@@ -47,6 +47,11 @@ function groupFooter(result: unknown, context: unknown, theme: unknown, presenta
   return (error ? t.fg("text", t.bold("Error · ")) : "") + t.fg("muted", footer);
 }
 
+/** Lab .output repeats the call as plain muted text, not title/accent styling. */
+function repeatedGroupCall(header: string, theme: unknown): string {
+  return (theme as { fg(color: string, text: string): string }).fg("muted", stripTerminalSequences(header));
+}
+
 function groupedResult(
   result: unknown, options: unknown, theme: unknown, context: unknown,
   presentation: GroupToolPresentation, body: (width: number) => string[],
@@ -58,7 +63,7 @@ function groupedResult(
     render(width) {
       if (!expanded) return wrapTextWithAnsi(footer, width);
       const header = presentation.callHeader?.(width) ?? "";
-      return [...wrapTextWithAnsi(footer, width), ...wrapTextWithAnsi(header, width), "", ...body(width)];
+      return [...wrapTextWithAnsi(footer, width), ...wrapTextWithAnsi(repeatedGroupCall(header, theme), width), "", ...body(width)];
     },
     invalidate() {},
   };
@@ -118,7 +123,7 @@ export function createCallRenderer(name: string, presentation?: GroupToolPresent
     return {
       render(width: number) {
         return [truncateToWidth(line, width, "…"), ...(!presentation.hasResult
-          ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded ? [...wrapTextWithAnsi(line, width), ""] : [])] : [])];
+          ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded ? [...wrapTextWithAnsi(repeatedGroupCall(line, theme), width), ""] : [])] : [])];
       },
       invalidate() {},
     };
@@ -259,7 +264,7 @@ export function withTiming(orig: CallRenderer | undefined, selfShell = false, pr
           const header = presentation.callHeader!(width);
           return [truncateToWidth(header, width, "…"), ...(!presentation.hasResult
             ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded
-              ? [...wrapTextWithAnsi(header, width), "", ...presentation.callBody!(width)] : [])] : [])];
+              ? [...wrapTextWithAnsi(repeatedGroupCall(header, theme), width), "", ...presentation.callBody!(width)] : [])] : [])];
         }
         const lines = nativeLines(width);
         // Native edit/write calls include body previews. Only the header belongs
