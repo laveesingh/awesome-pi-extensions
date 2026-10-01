@@ -14,6 +14,7 @@ ROOT="$(mktemp -d /tmp/visor-verify.XXXXXX)"
 mkdir -p "$ROOT/agent"
 printf '%s\n' '{"quietStartup":true}' > "$ROOT/agent/settings.json"
 cd "$ROOT"
+ROOT="$(pwd -P)"
 PI_CODING_AGENT_DIR="$ROOT/agent" VISOR_VERIFY_ROOT="$ROOT" PI_TELEMETRY=0 \
   pi --offline --tui-mode fullscreen --no-extensions --no-skills \
   --no-prompt-templates --no-themes --no-context-files --no-approve \
