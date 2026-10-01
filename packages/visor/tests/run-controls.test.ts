@@ -89,18 +89,35 @@ for (const combined of [false, true]) {
     click(1); assert.equal(group.expanded, true); assert.equal(note.expanded, true);
     group.render(80);
     const covered = new Set(group.childRows.flatMap((row) => Array.from({ length: row.height }, (_, i) => row.start + i)));
-    const chrome = Array.from({ length: group.render(80).length }, (_, i) => i).filter((y) => !covered.has(y));
+    const painted = group.render(80);
+    const chrome = painted.map((line, y) => ({ line, y })).filter(({ line, y }) =>
+      y < 3 || /[┌├└]/.test(line) || line.includes("Run in progress") || line.includes("End of run")).map(({ y }) => y);
     for (const y of chrome) {
       group.setLayerExpanded(true); group.render(80); click(y);
       assert.equal(group.expanded, false, `chrome row ${y} toggles only layer 1`);
     }
     group.setLayerExpanded(true); group.render(80);
     click(group.childRows.find((row) => row.child === view)!.start, 0);
-    assert.equal(group.expanded, false, "vertical frame border is parent chrome");
+    assert.equal(group.expanded, true, "child-region side columns are not parent chrome");
     assert.ok(nativeCalls > 0);
     clicks.dispose(); getRegistry().handlers.clear();
   });
 }
+
+test("gap rows and child-region side columns ignore clicks without changing touched or expansion", () => {
+  const { group, note, view } = fixture(); group.render(80);
+  const spans = group.childRows;
+  const gap = spans[0].start + spans[0].height;
+  assert.ok(gap < spans[1].start, "fixture contains a real inter-child gap");
+  assert.equal(group.touched, false);
+  for (const [y, x] of [[gap, 5], [spans[0].start, 0], [spans[0].start, 1], [spans[1].start, 78], [spans[1].start, 79]]) {
+    assert.equal(group.handleMouse(event(group, y, x)), undefined);
+    assert.equal(group.expanded, true); assert.equal(group.touched, false);
+    assert.equal(note.expanded, false); assert.equal((view.component as any).expanded, false);
+  }
+  group.handleMouse(event(group, 1));
+  assert.equal(group.expanded, false); assert.equal(group.touched, true);
+});
 
 test("Ctrl+O cascades to both layers and late children, with D12 thought-only/text meanings", () => {
   const { group, note, c } = fixture();

@@ -25,6 +25,7 @@ export default function verifyTurnGroups(pi) {
     },
   });
   pi.registerCommand("vqueue", { description: "Queue a sandbox steering + follow-up during the next tool batch", handler: () => { queue = true; pi.sendUserMessage("live"); } });
+  const runtimeId = Date.now().toString(36); // tool IDs must remain unique across fixture reloads
   let queue = false, queued = false, stage = 0, serial = 0, scenario = "multi", epoch = 0;
   pi.on("tool_execution_start", () => {
     if (!queue || queued) return;
@@ -54,7 +55,7 @@ export default function verifyTurnGroups(pi) {
       };
       const emitCall = (name, args) => {
         const index = output.content.length;
-        const call = { type: "toolCall", id: `verify-${epoch}-${++serial}`, name, arguments: {} };
+        const call = { type: "toolCall", id: `verify-${runtimeId}-${epoch}-${++serial}`, name, arguments: {} };
         output.content.push(call);
         stream.push({ type: "toolcall_start", contentIndex: index, partial: output });
         call.arguments = args;

@@ -45,7 +45,7 @@ chat. A run without tools creates no frame.
 
 In **fullscreen mode**, click:
 
-- The header, metadata or frame chrome to toggle only the parent layer. Child states are kept.
+- The header, metadata, declared separators and group-end/border rows to toggle only the parent layer. Child states are kept. Inter-child gaps and child-region side columns do nothing.
 - A tool or commentary child to toggle only that child.
 - A managed thought line to toggle only its reasoning, including a thinking-only member.
 
@@ -68,8 +68,11 @@ falsely labeled Interrupted. Aborted pending tools count as stopped, not errors.
 
 Resume, compaction and tree navigation rebuild collapsed frames and children. Expansion state is
 not persisted. Live timing uses execution/streaming clocks. Rebuilt tool/run timing comes from
-recorded message timestamps; unavailable values and their separators are omitted. Commentary
-streaming duration is omitted after rebuild unless it was recorded.
+recorded message timestamps: a rebuilt tool shows its tool-result timestamp, but its execution
+duration is always omitted, even for a single call. Real tool start/end is not persisted, and a
+parallel batch's completion time must not become every tool's duration. Run timing remains the
+first-to-last message span. Unavailable values/separators are omitted; commentary streaming duration
+is omitted after rebuild unless it was recorded.
 
 ### Tool coverage
 

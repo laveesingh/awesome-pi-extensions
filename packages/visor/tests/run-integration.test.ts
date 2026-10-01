@@ -219,7 +219,7 @@ test("runtime seam failure rolls back partial grouping without duplicate flat co
   assert.ok(!chat.children.some((child) => child instanceof RunGroup));
 });
 
-test("rebuilt E8 timing uses supplied assistant/result timestamps; missing values omit separators", () => {
+test("rebuilt E8 tool time uses result timestamp, duration is always omitted, and missing values omit separators", () => {
   for (const [start, end] of [[1000, 2250], [1000, undefined], [undefined, 2250]] as const) {
     const chat = new Container();
     const controller = new TranscriptGrouping(chat, theme, () => {});
@@ -236,14 +236,43 @@ test("rebuilt E8 timing uses supplied assistant/result timestamps; missing value
     assert.equal(group.expanded, false);
     group.setLayerExpanded(true);
     const text = plain(group);
-    if (start !== undefined) assert.ok(text.includes(formatTime(start)));
-    if (start !== undefined && end !== undefined) assert.ok(text.includes("↳ 1 line • " + formatTime(start) + " • 1.25s (ctrl+o)"));
-    else assert.ok(!text.includes("0ms"));
-    if (start === undefined) assert.ok(text.includes("↳ 1 line (ctrl+o)"));
+    if (start !== undefined) assert.ok(text.includes(formatTime(start)), "run/commentary time still uses first assistant");
+    if (end !== undefined) assert.ok(text.includes("↳ 1 line • " + formatTime(end) + " (ctrl+o)"));
+    else assert.ok(text.includes("↳ 1 line (ctrl+o)"));
+    const toolFooter = text.split("\n").find((line) => line.includes("↳ 1 line"))!;
+    assert.ok(!/\d+(?:\.\d+)?(?:ms|s)\b/.test(toolFooter), "single-call restored execution duration is unavailable");
+    assert.ok(!text.includes("0ms"));
     assert.ok(!/•\s*\(ctrl\+o\)/.test(text));
     assert.ok(!/Commentary.*(?:ms|s)\b/.test(text));
     controller.dispose();
   }
+});
+
+test("rebuilt parallel tools never inherit assistant or whole-batch durations", () => {
+  const chat = new Container(); const controller = new TranscriptGrouping(chat, theme, () => {});
+  assert.ok(controller.install()); controller.rebuilding++;
+  const m = { role: "assistant", timestamp: 1000, stopReason: "toolUse", content: [
+    { type: "toolCall", id: "slow" }, { type: "toolCall", id: "fast" },
+  ] };
+  controller.prepareRebuild([m,
+    { role: "toolResult", toolCallId: "slow", timestamp: 13011 },
+    { role: "toolResult", toolCallId: "fast", timestamp: 13012 },
+  ]);
+  controller.beforeMessage(m);
+  chat.addChild(new Pi.AssistantMessageComponent(m as never));
+  for (const id of ["slow", "fast"]) {
+    const c = new Pi.ToolExecutionComponent("fixture_hold", id, {}, {}, undefined, nativeUi, process.cwd());
+    chat.addChild(c); c.updateResult({ content: [{ type: "text", text: "body" }], isError: false });
+  }
+  controller.rebuilding--;
+  const group = controller.frames[0].group; group.setLayerExpanded(true);
+  const rows = plain(group).split("\n").filter((line) => line.includes("↳ 1 line"));
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].includes(formatTime(13011))); assert.ok(rows[1].includes(formatTime(13012)));
+  assert.ok(rows.every((line) => !/12\.01|12\.02|\d+ms/.test(line)));
+  assert.equal(controller.frames[0].first, 1000); assert.equal(controller.frames[0].last, 13012);
+  assert.ok(plain(group).includes("12s"), "the recorded run span remains available");
+  controller.dispose();
 });
 
 test("D11 live and rebuilt tool-only/thought-only members remain uncounted and preserve timing/order", () => {
@@ -313,6 +342,30 @@ test("hook failure leaves the original flat tree and emits one notice", () => {
   assert.deepEqual(chat.children, [row]);
   assert.equal(notices.length, 1);
   assert.match(notices[0], /transcript stays flat/);
+});
+
+test("reload owner handoff recaptures retained mode/UI before rebuild without another UI factory call", () => {
+  const chat = new Container(); const notice: string[] = [];
+  const mode: any = { chatContainer: chat, pendingTools: new Map(), ui: { requestRender() {} },
+    handleEvent: async () => {}, addMessageToChat() {}, renderSessionItems() {}, addCustomEntryToChat() {}, showStatus() {} };
+  const handlers = new Map<string, (...args: any[]) => void>();
+  const pi = { on: (event: string, handler: (...args: any[]) => void) => { handlers.set(event, handler); } } as never;
+  const old = new RunGrouping(); old.install(pi); old.capture(mode, { theme: theme(), notify: (text: string) => notice.push(text) });
+  const previous = groupingForMode(mode)!;
+  handlers.get("session_shutdown")!({ reason: "reload" });
+  assert.equal(groupingForMode(mode), undefined);
+  const next = new RunGrouping(); next.install(pi);
+  const current = groupingForMode(mode)!;
+  assert.ok(current, "new install must capture before beforeSessionStart rebuild");
+  assert.notEqual(current, previous);
+  chat.clear(); chat.addChild(assistant(1000)); chat.addChild(component());
+  assert.equal(current.frames.length, 1); assert.equal(current.frames[0].group.expanded, false);
+  current.begin(); current.boundary(); chat.addChild(assistant(2000)); chat.addChild(component());
+  assert.equal(current.frames.length, 2);
+  assert.equal(current.frames[1].group.counts.tools, 1);
+  assert.deepEqual(notice, []);
+  handlers.get("session_shutdown")!({ reason: "quit" });
+  assert.equal(groupingForMode(mode), undefined);
 });
 
 test("live instance capture is idempotent; native status duplicate detection and custom splice see grouped children", () => {

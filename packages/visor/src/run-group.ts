@@ -22,6 +22,7 @@ export class RunGroup extends Container {
   private cache = new WeakMap<RunChild, CachedChild>();
   private layout: ChildRows[] = [];
   private layoutWidth = 0;
+  private parentMouseRows = new Set<number>();
   private cascade?: boolean;
   private cascadeKinds = new WeakMap<RunChild, string>();
   private runActive: boolean;
@@ -136,9 +137,9 @@ export class RunGroup extends Container {
     if (event.y < 0 || event.y >= event.height || event.x < 0 || event.x >= event.width) return undefined;
     if (this.layoutWidth !== event.width) this.render(event.width);
     const primary = event.type === "click" && event.button === "left";
-    const row = this.expanded && event.x >= 2 && event.x < event.width - 2
-      ? this.layout.find((entry) => event.y >= entry.start && event.y < entry.start + entry.height) : undefined;
+    const row = this.expanded ? this.layout.find((entry) => event.y >= entry.start && event.y < entry.start + entry.height) : undefined;
     if (row) {
+      if (event.x < 2 || event.x >= event.width - 2) return undefined;
       const local = { ...event, x: event.x - 2, y: event.y - row.start, width: row.width, height: row.height };
       if (row.child instanceof ToolRunChild) {
         const before = (row.child.component as unknown as { expanded: boolean }).expanded;
@@ -153,13 +154,14 @@ export class RunGroup extends Container {
       }
       return undefined; // auxiliary rows are not group/child toggle targets
     }
-    if (!primary) return undefined;
+    if (!primary || !this.parentMouseRows.has(event.y)) return undefined;
     this.markTouched();
     this.setLayerExpanded(!this.expanded);
     return handled();
   }
   override render(width: number): string[] {
     this.layout = [];
+    this.parentMouseRows.clear();
     this.layoutWidth = width;
     const counts = this.counts;
     if (!counts.tools) return []; // P1: never an empty or commentary-only frame.
@@ -185,7 +187,9 @@ export class RunGroup extends Container {
     const lines = [border("┌", "┐"), ...wrapTextWithAnsi(header, innerWidth).map(frame)];
     // Meta keeps its two-cell indent on every wrapped row.
     lines.push(...wrapTextWithAnsi(meta, Math.max(1, innerWidth - 2)).map((line) => frame("  " + line)));
+    for (let row = 0; row < lines.length; row++) this.parentMouseRows.add(row);
     if (this.expanded) {
+      this.parentMouseRows.add(lines.length);
       lines.push(border("├", "┤"));
       let previousKind: RunChild["kind"] | undefined;
       for (const child of this.entries) {
@@ -197,8 +201,11 @@ export class RunGroup extends Container {
         lines.push(...childLines.map(frame));
         previousKind = child.kind;
       }
+      this.parentMouseRows.add(lines.length);
+      this.parentMouseRows.add(lines.length + 1);
       lines.push(border("├", "┤"), frame(t.fg("muted", this.metadata.live ? "Run in progress" : "End of run · final response below")));
     }
+    this.parentMouseRows.add(lines.length);
     lines.push(border("└", "┘"));
     // Terminal widths smaller than the frame's four-cell budget can only clip.
     return w < 5 ? lines.map((line) => fitLine(line, w)) : lines;

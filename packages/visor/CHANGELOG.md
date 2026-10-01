@@ -5,6 +5,13 @@ All notable changes to `pi-visor` are documented here. This project follows
 
 ## [Unreleased]
 
+- Retain the captured live mode/UI across reload and recapture for the new extension owner before
+  rebuilding, so grouping survives `/reload` and subsequent runs without stacked hooks.
+- Omit all rebuilt per-tool execution durations, including single calls; use each tool-result
+  timestamp for its clock. Preserve live frozen timing and recorded run/message spans.
+- Ignore inter-child gap rows and child-region side columns; only declared frame chrome toggles
+  the parent, and ignored clicks do not mark it touched.
+
 - Group tool runs into bounded two-layer frames; retain native final answers below them, truthful
   recorded timing on rebuild, and collapsed-state reset on resume/compaction/tree navigation.
 - Add native fullscreen header/child/thought clicks without requiring viewport-mouse; grouped

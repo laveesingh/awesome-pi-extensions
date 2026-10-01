@@ -147,7 +147,9 @@ export class TranscriptGrouping {
     }
   }
   private derived(time?: ToolTime): RecordedTiming {
-    return { timestamp: time?.assistant, durationMs: time?.assistant !== undefined && time.result !== undefined && time.result >= time.assistant ? time.result - time.assistant : undefined };
+    // E8 rev10: message times do not persist actual execution start/end, and
+    // parallel batches persist results at batch end. Never infer tool duration.
+    return { timestamp: time?.result };
   }
   private observeTool(component: Component, id: string): void {
     const target = component as unknown as Mutable;
@@ -357,7 +359,7 @@ export class TranscriptGrouping {
 }
 
 const captureKey = Symbol.for("pi.visor.run-integration.capture.v1");
-interface CaptureRegistry { owner?: RunGrouping; original: (...args: any[]) => any }
+interface CaptureRegistry { owner?: RunGrouping; original: (...args: any[]) => any; captures: Map<Mutable, Mutable> }
 
 /** Capture the actual InteractiveMode, before initial history render, via its UI binding seam. */
 export class RunGrouping {
@@ -368,12 +370,19 @@ export class RunGrouping {
   install(pi: ExtensionAPI): void {
     const proto = InteractiveMode.prototype as unknown as Mutable;
     const registry = proto[captureKey] as CaptureRegistry | undefined;
-    if (registry) { registry.owner?.dispose(); this.registry = registry; registry.owner = this; }
+    if (registry) {
+      registry.owner?.dispose();
+      this.registry = registry; registry.owner = this;
+      // /reload reuses UI context and does not invoke its factory again.
+      // Hand off the retained live instance before beforeSessionStart rebuild.
+      for (const [mode, ui] of registry.captures) this.capture(mode, ui);
+    }
     else if (typeof proto.createExtensionUIContext === "function") {
-      const state: CaptureRegistry = { owner: this, original: proto.createExtensionUIContext };
+      const state: CaptureRegistry = { owner: this, original: proto.createExtensionUIContext, captures: new Map() };
       proto[captureKey] = state;
       proto.createExtensionUIContext = function (this: Mutable, ...args: unknown[]) {
         const ui = state.original.apply(this, args);
+        state.captures.set(this, ui);
         state.owner?.capture(this, ui);
         return ui;
       };
@@ -382,7 +391,10 @@ export class RunGrouping {
     pi.on("session_start", (_event, ctx) => {
       if (ctx.mode === "tui" && !this.modes.size) this.warn(ctx);
     });
-    pi.on("session_shutdown", () => this.dispose());
+    pi.on("session_shutdown", (event) => {
+      this.dispose();
+      if (event.reason !== "reload") this.registry?.captures.clear();
+    });
   }
   private warn(ctx: ExtensionContext): void {
     if (this.warned) return;
@@ -390,6 +402,7 @@ export class RunGrouping {
     ctx.ui.notify("pi-visor: run grouping unavailable; transcript stays flat", "warning");
   }
   capture(mode: Mutable, ui: Mutable): void {
+    this.registry?.captures.set(mode, ui);
     if (this.modes.has(mode) || this.disabled.has(mode)) return;
     const undo: Array<() => void> = [];
     if (!mode.chatContainer) {
