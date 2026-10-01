@@ -1,0 +1,10 @@
+{
+  "probedAllThree": true,
+  "removeChildCounts": {
+    "abort-text": 0,
+    "provider-error": 0,
+    "abort-toolstream": 0
+  },
+  "tracePath": "/private/tmp/visor-order-yvzft8ue/native-order.jsonl",
+  "traceSha256": "4042facda62bbd7287b0749cb360a795211e14db59407dbd4bab1ea3650becad"
+}

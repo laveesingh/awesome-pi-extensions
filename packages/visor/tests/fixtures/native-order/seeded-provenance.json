@@ -1,0 +1,16 @@
+{
+  "piVersion": "0.99.1",
+  "nodeVersion": "v22.22.3",
+  "pid": 35813,
+  "actualCli": "/Users/laveesingh/.nvm/versions/node/v22.22.3/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+  "packageRoot": "/Users/laveesingh/.nvm/versions/node/v22.22.3/lib/node_modules/@earendil-works/pi-coding-agent",
+  "actualCliSha256": "e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774",
+  "nativeHandlerSha256": "4b2ab60f686ebec3c8a9fce7b878a177425fafcccb9d63feb88c565621bb2c12",
+  "nativeSource": "/Users/laveesingh/.nvm/versions/node/v22.22.3/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js",
+  "nativeSourceSha256": "20637835b51c2a33f1c152d94a875d28d762bd99ba27d6679c2c538ab9028276",
+  "recorderSource": "/Users/laveesingh/Documents/software/awesome-pi-extensions/packages/visor/tests/fixtures/record-pi-order.js",
+  "recorderSha256": "8fd9f573ae503bb9c1db061d284a4af314a9b67dde6520dc80678df3d7b6d4ce",
+  "groupingLoaded": false,
+  "source": "Actual InteractiveMode.handleEvent + container methods; no authored operation list",
+  "seedEnabled": true
+}

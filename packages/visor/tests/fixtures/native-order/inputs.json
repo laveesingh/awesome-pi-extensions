@@ -1,0 +1,13 @@
+[
+  "queue-case + Enter",
+  "Ctrl+O during first live fixture tool",
+  "Ctrl+O again for native showStatus duplicate path",
+  "no-tool-case + Enter",
+  "abort-text-case + Enter",
+  "Escape during abort-text",
+  "provider-error-case + Enter",
+  "abort-toolstream-case + Enter",
+  "Escape during abort-toolstream",
+  "Ctrl+O before rebuild to prove reset",
+  "/compact + Enter (real compaction, offline summary override)"
+]

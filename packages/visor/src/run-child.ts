@@ -102,7 +102,9 @@ type AssistantInternals = {
 
 /** A wrapper state, not AssistantMessageComponent.setExpanded (which means thinking). */
 export class CommentaryRunChild extends RevisionObserver implements RunChild {
-  readonly kind = "note";
+  // D11: preserve the original member and its timestamp/order, but count and
+  // render a commentary shell only once visible text actually exists.
+  get kind(): "note" | "row" { return this.text().trim() ? "note" : "row"; }
   readonly failed = false;
   readonly stopped = false;
   expanded = false;
@@ -125,13 +127,14 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
     return this.native.contentContainer.children.filter((child) => child.__visorThoughtLine === true) as ThoughtLine[];
   }
   /** Slice 3 uses these row ranges to retain the thought line's own click meaning. */
-  thoughtLayout(width: number): Array<{ component: ThoughtLine; start: number; height: number }> {
-    if (!this.expanded) return [];
-    const contentWidth = Math.max(1, width - 2);
-    let start = wrapTextWithAnsi(this.footer(), contentWidth).length + 1;
+  thoughtLayout(width: number): Array<{ component: ThoughtLine; start: number; height: number; width: number; x: number }> {
+    const commentary = this.kind === "note";
+    if (commentary && !this.expanded) return [];
+    const contentWidth = commentary ? Math.max(1, width - 2) : width;
+    let start = commentary ? wrapTextWithAnsi(this.footer(), contentWidth).length + 1 : 0;
     return this.thoughtLines.map((component) => {
       const height = component.render(contentWidth).length;
-      const row = { component, start, height };
+      const row = { component, start, height, width: contentWidth, x: commentary ? 1 : 0 };
       start += height;
       return row;
     });
@@ -147,6 +150,9 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
     return this.theme().fg("muted", `↳ ${count} line${count === 1 ? "" : "s"}${parts.map((part) => ` • ${part}`).join("")} (ctrl+o)`);
   }
   render(width: number): string[] {
+    // Tool-only messages add no row. Thought-only messages expose exactly the
+    // existing managed thought component, with its own expansion meaning.
+    if (this.kind === "row") return this.thoughtLines.flatMap((line) => line.render(width));
     const t = this.theme();
     const text = this.text();
     const header = t.fg("text", t.bold("Commentary") + (text ? ` ${text.split("\n")[0]}` : ""));
