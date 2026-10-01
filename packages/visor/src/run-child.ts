@@ -1,6 +1,7 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, type TuiMouseEvent, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { stripAnsi } from "./format.js";
+import { continuousChildPaint } from "./child-paint.js";
 import { timingParts, type RecordedTiming, type ThemeSource } from "./run-style.js";
 import { ownsTool, setGroupedToolPresentation, type GroupToolPresentation } from "./tool-display.js";
 import type { ThoughtLine } from "./thinking.js";
@@ -81,7 +82,9 @@ export class ToolRunChild extends RevisionObserver implements RunChild {
   render(width: number): string[] {
     const lines = this.component.render(width);
     // Pi prepends a Spacer(1). RunGroup owns the one inter-child gap instead.
-    return this.owned && lines.length && !stripAnsi(lines[0]).trim() ? lines.slice(1) : lines;
+    if (!this.owned) return lines;
+    const childLines = lines.length && !stripAnsi(lines[0]).trim() ? lines.slice(1) : lines;
+    return childLines.map(continuousChildPaint);
   }
   handleMouse(event: TuiMouseEvent): ReturnType<ToolExecutionComponent["handleMouse"]> {
     const offset = this.owned ? 1 : 0;
