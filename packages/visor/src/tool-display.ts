@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Text, type Component } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import { timingParts, type RecordedTiming } from "./run-style.js";
 import { compactResult, extractToolText, formatTime, notifyOnce, stripAnsi } from "./format.js";
 import { debugLog } from "./pi-modules.js";
 import { toolArgSummary } from "./tool-args.js";
@@ -12,6 +13,56 @@ export const EXCLUDED = new Set<string>();
 
 export type CallRenderer = (args: unknown, theme: unknown, context: unknown) => unknown;
 export type ResultRenderer = (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown;
+
+/** D10 is opt-in per component; flat AWE-1 renderers never see this state. */
+export interface GroupToolPresentation {
+  timing?: RecordedTiming;
+  stopped?: boolean;
+  hasResult?: boolean;
+  callHeader?: (width: number) => string;
+  callBody?: (width: number) => string[];
+}
+const groupedTools = new WeakMap<object, GroupToolPresentation>();
+export function setGroupedToolPresentation(component: object, presentation?: GroupToolPresentation): void {
+  if (presentation) groupedTools.set(component, presentation);
+  else groupedTools.delete(component);
+}
+
+function groupFooter(result: unknown, context: unknown, theme: unknown, presentation: GroupToolPresentation): string {
+  const t = theme as { fg(c: string, s: string): string; bold(s: string): string };
+  const ctx = context as { state?: Record<string, unknown>; isPartial?: boolean; isError?: boolean };
+  if (!presentation.hasResult || ctx?.isPartial) return t.fg("muted", "↳ … running");
+  const text = extractToolText(result);
+  const lines = text ? text.split("\n") : [];
+  const count = lines.filter((line) => line.trim()).length || lines.length;
+  let label = `↳ ${count} line${count === 1 ? "" : "s"}`;
+  const r = result as { details?: { exitCode?: number; exit_code?: number } };
+  const exit = r.details?.exitCode ?? r.details?.exit_code ?? text.match(/(?:Exit code:|Command exited with code)\s*(-?\d+)/i)?.[1];
+  const error = ctx?.isError && !presentation.stopped;
+  if (error && exit !== undefined) label += ` · exit ${exit}`;
+  const startedAt = ctx?.state?.startedAt as number | undefined;
+  const timing = presentation.timing ? timingParts(presentation.timing)
+    : [formatTime(startedAt), settledDuration(ctx, startedAt)].filter(Boolean);
+  const footer = label + timing.map((part) => ` • ${part}`).join("") + " (ctrl+o)";
+  return (error ? t.fg("text", t.bold("Error · ")) : "") + t.fg("muted", footer);
+}
+
+function groupedResult(
+  result: unknown, options: unknown, theme: unknown, context: unknown,
+  presentation: GroupToolPresentation, body: (width: number) => string[],
+): Component {
+  const expanded = !!(options as { expanded?: boolean })?.expanded;
+  // Freeze live duration at the settled renderer invocation, not a later draw.
+  const footer = groupFooter(result, context, theme, presentation);
+  return {
+    render(width) {
+      if (!expanded) return wrapTextWithAnsi(footer, width);
+      const header = presentation.callHeader?.(width) ?? "";
+      return [...wrapTextWithAnsi(footer, width), ...wrapTextWithAnsi(header, width), "", ...body(width)];
+    },
+    invalidate() {},
+  };
+}
 
 /**
  * How long the call took, frozen at the first render that carries a settled
@@ -51,25 +102,38 @@ export function collapsedBlock(
   return new Text(t.fg("muted", `↳ ${what}`) + t.fg("dim", suffix), 0, 0);
 }
 
-export function createCallRenderer(name: string): CallRenderer {
+export function createCallRenderer(name: string, presentation?: GroupToolPresentation): CallRenderer {
   return (args: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string; bold: (s: string) => string };
-    const ctx = context as { state?: Record<string, unknown>; executionStarted?: boolean } | undefined;
+    const ctx = context as { state?: Record<string, unknown>; executionStarted?: boolean; expanded?: boolean } | undefined;
     if (ctx?.executionStarted === true && ctx.state && typeof ctx.state.startedAt !== "number") {
       ctx.state.startedAt = Date.now();
     }
     const summary = toolArgSummary(name, (args as Record<string, unknown>) ?? {});
     let line = t.fg("toolTitle", t.bold(name));
     if (summary) line += ` ${t.fg("accent", summary)}`;
-    return new Text(line, 0, 0);
+    if (!presentation) return new Text(line, 0, 0);
+    presentation.callHeader = () => line;
+    presentation.callBody = () => [];
+    return {
+      render(width: number) {
+        return [truncateToWidth(line, width, "…"), ...(!presentation.hasResult
+          ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded ? [...wrapTextWithAnsi(line, width), ""] : [])] : [])];
+      },
+      invalidate() {},
+    };
   };
 }
 
-export function createResultRenderer(): ResultRenderer {
+export function createResultRenderer(presentation?: GroupToolPresentation): ResultRenderer {
   return (result: unknown, options: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string };
     const opts = options as { expanded?: boolean; isPartial?: boolean };
     const ctx = context as { state?: Record<string, unknown> } | undefined;
+    if (presentation) {
+      return groupedResult(result, options, theme, context, presentation, (width) =>
+        wrapTextWithAnsi(t.fg("muted", extractToolText(result)), width));
+    }
     if (opts?.isPartial) return new Text(t.fg("warning", "…"), 0, 0);
     const startedAt = ctx?.state?.startedAt as number | undefined;
     const dur = settledDuration(ctx, startedAt);
@@ -109,17 +173,27 @@ function keepNative<T extends object>(component: T, native: unknown): T {
   return component;
 }
 
-export function createPassthroughResultRenderer(orig: ResultRenderer | undefined): ResultRenderer {
+export function createPassthroughResultRenderer(orig: ResultRenderer | undefined, presentation?: GroupToolPresentation): ResultRenderer {
   return (result: unknown, options: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string };
     const opts = options as { expanded?: boolean; isPartial?: boolean };
     const ctx = context as { state?: Record<string, unknown> } | undefined;
-    if (opts?.isPartial) return new Text(t.fg("warning", "…"), 0, 0);
+    if (opts?.isPartial && !presentation) return new Text(t.fg("warning", "…"), 0, 0);
     const startedAt = ctx?.state?.startedAt as number | undefined;
     const dur = settledDuration(ctx, startedAt);
     const origOut = (() => {
       try { return orig ? orig(result, options, theme, nativeContext(context)) : undefined; } catch { return undefined; }
     })();
+    if (presentation) {
+      return keepNative(groupedResult(result, options, theme, context, presentation, (width) => {
+        const callBody = presentation.callBody?.(width) ?? [];
+        let resultBody = (origOut as Component | undefined)?.render(width) ?? [];
+        if (resultBody.every((line) => !stripAnsi(line).trim())) {
+          resultBody = wrapTextWithAnsi(t.fg("dim", extractToolText(result)), width);
+        }
+        return [...callBody, ...resultBody];
+      }), origOut);
+    }
     if (!opts?.expanded) {
       return keepNative(collapsedBlock(t, result, extractToolText(result), startedAt, dur) as object, origOut);
     }
@@ -151,7 +225,7 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
  * transcript components never receive that mark, so they must not invent a
  * resume clock or duration. Passthrough calls need the same timing guard.
  */
-export function withTiming(orig: CallRenderer | undefined, selfShell = false): CallRenderer | undefined {
+export function withTiming(orig: CallRenderer | undefined, selfShell = false, presentation?: GroupToolPresentation): CallRenderer | undefined {
   if (!orig) return orig;
   return (args: unknown, theme: unknown, context: unknown) => {
     const ctx = context as { state?: Record<string, unknown>; expanded?: boolean; executionStarted?: boolean } | undefined;
@@ -159,16 +233,35 @@ export function withTiming(orig: CallRenderer | undefined, selfShell = false): C
       ctx.state.startedAt = Date.now();
     }
     const native = orig(args, theme, nativeContext(context)) as Component;
+    const nativeLines = (width: number) => {
+      const children = (native as Component & { children?: Component[] }).children;
+      return selfShell && Array.isArray(children) ? children.flatMap((child) => child.render(width)) : native.render(width);
+    };
+    if (presentation) {
+      const n = native as Component & { text?: string; children?: Array<{ text?: string }> };
+      presentation.callHeader = (width) => (n.text ?? n.children?.[0]?.text)?.split("\n")[0]
+        ?? nativeLines(width).find((line) => stripAnsi(line).trim()) ?? "";
+      presentation.callBody = (width) => {
+        const lines = nativeLines(width).slice(wrapTextWithAnsi(presentation.callHeader!(width), width).length);
+        while (lines.length && !stripAnsi(lines[0]).trim()) lines.shift();
+        while (lines.length && !stripAnsi(lines.at(-1)!).trim()) lines.pop();
+        return lines;
+      };
+    }
     return keepNative({
       render(width: number) {
         // Edit owns a Box in Pi 0.99's self shell. Visor supplies the outer Box,
         // so render its children without adding a second frame or padding.
         // Pi's shrinkwrap can install a second pi-tui copy. Use the public
         // children contract rather than instanceof across module identities.
-        const children = (native as Component & { children?: Component[] }).children;
-        const lines = selfShell && Array.isArray(children)
-          ? children.flatMap((child) => child.render(width))
-          : native.render(width);
+        if (presentation) {
+          const t = theme as { fg(c: string, s: string): string };
+          const header = presentation.callHeader!(width);
+          return [truncateToWidth(header, width, "…"), ...(!presentation.hasResult
+            ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded
+              ? [...wrapTextWithAnsi(header, width), "", ...presentation.callBody!(width)] : [])] : [])];
+        }
+        const lines = nativeLines(width);
         // Native edit/write calls include body previews. Only the header belongs
         // in the two-line collapsed form; retain the full native body on expand.
         return ctx?.expanded ? lines : lines.filter((line) => stripAnsi(line).trim()).slice(0, 1);
@@ -230,7 +323,7 @@ export function patchToolExecutionComponent(): boolean {
     return false;
   }
 
-  type Self = { toolName: string };
+  type Self = { toolName: string; result?: unknown };
 
   // Owned tools always take the renderer path, never the raw formatToolExecution()
   // text dump — that fallback is what printed MCP results as raw JSON.
@@ -247,16 +340,20 @@ export function patchToolExecutionComponent(): boolean {
 
   proto.getCallRenderer = function (this: Self) {
     if (!ownsTool(this.toolName)) return origGetCall.call(this);
+    const presentation = groupedTools.get(this);
+    if (presentation) presentation.hasResult = this.result !== undefined;
     if (PASSTHROUGH.has(this.toolName)) {
-      return withTiming(origGetCall.call(this), origGetShell.call(this) === "self") ?? createCallRenderer(this.toolName);
+      return withTiming(origGetCall.call(this), origGetShell.call(this) === "self", presentation)
+        ?? createCallRenderer(this.toolName, presentation);
     }
-    return createCallRenderer(this.toolName);
+    return createCallRenderer(this.toolName, presentation);
   };
 
   proto.getResultRenderer = function (this: Self) {
     if (!ownsTool(this.toolName)) return origGetResult.call(this);
-    if (PASSTHROUGH.has(this.toolName)) return createPassthroughResultRenderer(origGetResult.call(this));
-    return createResultRenderer();
+    const presentation = groupedTools.get(this);
+    if (PASSTHROUGH.has(this.toolName)) return createPassthroughResultRenderer(origGetResult.call(this), presentation);
+    return createResultRenderer(presentation);
   };
 
   (proto as Record<string, unknown>).__visorToolDisplay = true;
