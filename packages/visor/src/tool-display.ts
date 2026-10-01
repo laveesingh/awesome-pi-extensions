@@ -1,37 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { compactResult, extractToolText, formatDuration, formatTime, notifyOnce, stripAnsi } from "./format.js";
+import { Text, type Component } from "@earendil-works/pi-tui";
+import { compactResult, extractToolText, formatTime, notifyOnce, stripAnsi } from "./format.js";
 import { debugLog } from "./pi-modules.js";
 import { toolArgSummary } from "./tool-args.js";
 
 // ── Tool display ─────────────────────────────────────────────────────────────
-export const UNCOVERED = new Set([
-  "bash",
-  "grep",
-  "web_search",
-  "web_fetch",
-  "fetch_content",
-  "get_search_content",
-  "source_check",
-  "ticket_get",
-  "ticket_list",
-  "ticket_create",
-  "ticket_update",
-  "ticket_comment",
-  "ticket_comment_reply",
-  "ticket_comment_update",
-  "project_context",
-  "sessions_dispatchable",
-  "ticket_dispatch",
-  "session_notify",
-  "session_role",
-  "ack",
-  "respond",
-  "look_at",
-  "interactive_bash",
-  "glob",
-]);
+// Native rendering is opt-out. Add an exclusion only with a documented reason;
+// exclusions take precedence over PASSTHROUGH and have no user-facing setting.
+export const EXCLUDED = new Set<string>();
 
 export type CallRenderer = (args: unknown, theme: unknown, context: unknown) => unknown;
 export type ResultRenderer = (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown;
@@ -110,10 +87,26 @@ export const PASSTHROUGH = new Set(["read", "edit", "write", "ls", "find"]);
 /**
  * Passthrough: Pi keeps the call line and the expanded body (edit/write diffs,
  * read previews), we own the collapsed state and the footer. `orig` is whatever
- * Pi itself resolved for this component — including the built-in renderer, which
- * is where the diffs actually live, so this must be given the component's own
- * resolved renderer rather than a registered tool definition.
+ * Pi itself resolved from the component's toolDefinition. Pi 0.99's edit renderer
+ * also updates the native call component with the settled diff, even while our
+ * result is collapsed. Preserve native lastComponent identities across wrappers.
  */
+const nativeComponent = Symbol("visorNativeComponent");
+type WrappedComponent = Component & { [nativeComponent]?: Component };
+
+function nativeContext(context: unknown): unknown {
+  const ctx = context as { lastComponent?: WrappedComponent } | undefined;
+  if (!ctx) return context;
+  return { ...ctx, lastComponent: ctx.lastComponent?.[nativeComponent] ?? ctx.lastComponent };
+}
+
+function keepNative<T extends object>(component: T, native: unknown): T {
+  if (native && typeof (native as Component).render === "function") {
+    (component as WrappedComponent)[nativeComponent] = native as Component;
+  }
+  return component;
+}
+
 export function createPassthroughResultRenderer(orig: ResultRenderer | undefined): ResultRenderer {
   return (result: unknown, options: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string };
@@ -122,29 +115,31 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
     if (opts?.isPartial) return new Text(t.fg("warning", "…"), 0, 0);
     const startedAt = ctx?.state?.startedAt as number | undefined;
     const dur = settledDuration(ctx, startedAt);
-    if (!opts?.expanded) return collapsedBlock(t, result, extractToolText(result), startedAt, dur);
+    const origOut = (() => {
+      try { return orig ? orig(result, options, theme, nativeContext(context)) : undefined; } catch { return undefined; }
+    })();
+    if (!opts?.expanded) {
+      return keepNative(collapsedBlock(t, result, extractToolText(result), startedAt, dur) as object, origOut);
+    }
 
     const ts = formatTime(startedAt);
-    const origOut = (() => {
-      try { return orig ? orig(result, options, theme, context) : undefined; } catch { return undefined; }
-    })();
     const footLine = t.fg("dim", `— ${ts ? ts + " • " : ""}${dur || "0ms"}`);
     const rawBody = () => (extractToolText(result) || "").split("\n").map((l) => t.fg("dim", l));
     if (!origOut || typeof (origOut as { render?: unknown }).render !== "function") {
       return new Text([...rawBody(), footLine].join("\n"), 0, 0);
     }
-    return {
+    return keepNative({
       render: (width: number) => {
         let lines: string[] = [];
         try { lines = (origOut as { render: (w: number) => string[] }).render(width) ?? []; } catch {}
-        // Pi's edit/write renderers write their diff into the CALL component and
-        // can legitimately return nothing. Only substitute the raw text when the
+        // Pi 0.99's edit diff and write content live in the CALL component, so
+        // the native result can legitimately be empty. Substitute raw text when the
         // expansion would otherwise be empty, so we never hide the output.
         if (lines.every((l) => !stripAnsi(l).trim())) lines = rawBody();
         return [...lines, footLine];
       },
       invalidate() { try { (origOut as { invalidate?: () => void }).invalidate?.(); } catch {} },
-    };
+    }, origOut);
   };
 }
 
@@ -153,12 +148,28 @@ export function createPassthroughResultRenderer(orig: ResultRenderer | undefined
  * inline; passthrough tools keep Pi's call renderer, so it has to be wrapped or
  * every passthrough block reports a 0ms duration.
  */
-export function withTiming(orig: CallRenderer | undefined): CallRenderer | undefined {
+export function withTiming(orig: CallRenderer | undefined, selfShell = false): CallRenderer | undefined {
   if (!orig) return orig;
   return (args: unknown, theme: unknown, context: unknown) => {
-    const ctx = context as { state?: Record<string, unknown> } | undefined;
+    const ctx = context as { state?: Record<string, unknown>; expanded?: boolean } | undefined;
     if (ctx?.state && typeof ctx.state.startedAt !== "number") ctx.state.startedAt = Date.now();
-    return orig(args, theme, context);
+    const native = orig(args, theme, nativeContext(context)) as Component;
+    return keepNative({
+      render(width: number) {
+        // Edit owns a Box in Pi 0.99's self shell. Visor supplies the outer Box,
+        // so render its children without adding a second frame or padding.
+        // Pi's shrinkwrap can install a second pi-tui copy. Use the public
+        // children contract rather than instanceof across module identities.
+        const children = (native as Component & { children?: Component[] }).children;
+        const lines = selfShell && Array.isArray(children)
+          ? children.flatMap((child) => child.render(width))
+          : native.render(width);
+        // Native edit/write calls include body previews. Only the header belongs
+        // in the two-line collapsed form; retain the full native body on expand.
+        return ctx?.expanded ? lines : lines.filter((line) => stripAnsi(line).trim()).slice(0, 1);
+      },
+      invalidate() { native.invalidate?.(); },
+    }, native);
   };
 }
 
@@ -168,11 +179,9 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 //
 //   Every transcript block is a ToolExecutionComponent. It asks itself three
 //   questions while drawing — hasRendererDefinition(), getCallRenderer(),
-//   getResultRenderer() — and those already resolve Pi's own precedence between
-//   the registered tool definition and the built-in one
-//   (`toolDefinition.renderX ?? builtInToolDefinition.renderX`). Wrapping the
-//   component's methods therefore sits downstream of every source of renderers:
-//   built-ins, extension tools and MCP tools alike.
+//   getResultRenderer() — which resolve toolDefinition's renderers in Pi 0.99.
+//   Wrapping the component's methods sits downstream of every source of tool
+//   definitions: built-ins, extension tools and MCP tools alike.
 //
 //   The registry is the wrong place. `_toolDefinitions` and `_toolRegistry` are
 //   rebuilt on every refresh, so anything captured there goes stale, and
@@ -180,9 +189,8 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 //   nothing to miss and nothing to keep in sync.
 //
 //   It also gives passthrough tools something the registry cannot: the ORIGINAL
-//   resolved renderer, `origGetResult.call(this)`. For read/edit/write the diff
-//   and preview renderers live on builtInToolDefinition, which never appears in
-//   the registry at all.
+//   resolved renderer, `origGetResult.call(this)`, together with the native call
+//   renderer. On Pi 0.99 these carry read previews and edit/write bodies.
 //
 // The patch must be installed before the first component is constructed, because
 // the constructor calls getRenderShell() to pick its container. Extension load
@@ -190,7 +198,7 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 
 /** Tools whose rendering this extension owns end to end. */
 export function ownsTool(name: string): boolean {
-  return UNCOVERED.has(name) || PASSTHROUGH.has(name);
+  return !EXCLUDED.has(name);
 }
 
 let componentPatched = false;
@@ -233,15 +241,17 @@ export function patchToolExecutionComponent(): boolean {
   };
 
   proto.getCallRenderer = function (this: Self) {
-    if (UNCOVERED.has(this.toolName)) return createCallRenderer(this.toolName);
-    if (PASSTHROUGH.has(this.toolName)) return withTiming(origGetCall.call(this));
-    return origGetCall.call(this);
+    if (!ownsTool(this.toolName)) return origGetCall.call(this);
+    if (PASSTHROUGH.has(this.toolName)) {
+      return withTiming(origGetCall.call(this), origGetShell.call(this) === "self") ?? createCallRenderer(this.toolName);
+    }
+    return createCallRenderer(this.toolName);
   };
 
   proto.getResultRenderer = function (this: Self) {
-    if (UNCOVERED.has(this.toolName)) return createResultRenderer();
+    if (!ownsTool(this.toolName)) return origGetResult.call(this);
     if (PASSTHROUGH.has(this.toolName)) return createPassthroughResultRenderer(origGetResult.call(this));
-    return origGetResult.call(this);
+    return createResultRenderer();
   };
 
   (proto as Record<string, unknown>).__visorToolDisplay = true;

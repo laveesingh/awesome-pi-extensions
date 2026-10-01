@@ -78,9 +78,15 @@ export function extractToolText(result: unknown): string {
   const r = result as Record<string, unknown>;
   const content = r.content as unknown[];
   if (!Array.isArray(content)) return "";
-  const first = content[0] as Record<string, unknown> | undefined;
-  if (first?.type === "text" && typeof first.text === "string") return first.text;
-  return "";
+  // Codemode returns a status header followed by separate text output blocks.
+  // Preserve every text block; images remain on Pi's own image-rendering path.
+  return content
+    .filter((block): block is { type: "text"; text: string } =>
+      !!block && typeof block === "object" &&
+      (block as Record<string, unknown>).type === "text" &&
+      typeof (block as Record<string, unknown>).text === "string")
+    .map((block) => block.text)
+    .join("\n");
 }
 
 /**

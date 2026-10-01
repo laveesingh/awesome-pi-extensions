@@ -34,13 +34,17 @@ is the whole scope: **`pi-visor` changes how a session reads, never how the agen
 
 ### Tool coverage
 
-Built-ins, extension tools and MCP tools are all covered, in two styles:
+Every tool is owned by default, including new built-ins, extension tools and MCP tools:
 
-- **Replaced** — `bash`, `grep`, `glob`, web tools, and MCP tools get a uniform call line and footer.
-- **Passthrough** — `read`, `edit`, `write`, `ls`, `find` keep Pi's own call line and expanded body,
-  so **edit and write diffs survive**; only the collapsed state and footer are ours.
+- **Generic** — all tools other than the passthrough set get a uniform call line and footer.
+  This includes `powershell`, `codemode`, Task tools, and web tools.
+- **Passthrough** — `read`, `edit`, `write`, `ls`, `find` keep Pi's native call header and expanded
+  body. Native edit diffs and write content remain available on expansion, with no preview in
+  the two-line collapsed form.
 
-A tool `pi-visor` does not own renders exactly as Pi renders it, untouched.
+The source-level `EXCLUDED` set is empty. An explicitly excluded tool keeps Pi's native rendering,
+shell, and fallback behavior; exclusion takes precedence over passthrough. There is no user-facing
+exclusion setting. Additions to this set require a documented reason.
 
 ### Structured results
 
@@ -70,8 +74,8 @@ Neither is required. Without them `ctrl+o` still expands everything, and nothing
 
 ## Requirements
 
-- **Node 20 or newer.**
-- **Pi 0.84.x.** This patches Pi internals (see Stability), so a major Pi change can break it.
+- **Node 22.19 or newer**, as required by Pi 0.99.
+- **Pi 0.99.1.** This patches Pi internals (see Stability), so a Pi update can break it.
 - **For clicks only:** `pi-viewport-mouse` and Pi's fullscreen TUI, which is *not* Pi's default.
 
 ## Expansion
@@ -102,6 +106,10 @@ whose prototypes nothing ever calls.
 The tool-block patch deliberately sits on the **component**, not the tool registry. Pi rebuilds its
 registry maps on every refresh, so anything captured there goes stale; the component asks for its
 renderers on every render, so there is nothing to miss and no registration race.
+
+On Pi 0.99, native renderers come from the component's `toolDefinition`. Visor uses the default
+outer shell for owned blocks and removes edit's native self-shell padding to avoid a second frame.
+Native component identities survive wrapping, so repeated expansion preserves previews and diffs.
 
 ## Debugging
 

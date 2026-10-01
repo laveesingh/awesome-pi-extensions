@@ -3,6 +3,19 @@
 All notable changes to `pi-visor` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Own every tool by default, including unknown names. Replace the inclusion list with an empty,
+  source-level `EXCLUDED` set; exclusions preserve native rendering and take precedence over
+  passthrough. No user-facing configuration is added.
+- Add argument summaries for `powershell`, `codemode`, `TaskCreate`, `TaskUpdate`, `TaskList`,
+  `google_search`, and `web_enable`.
+- Target Pi 0.99.1. Keep native edit diffs and write content on expansion, hide native call
+  previews while collapsed, and avoid double-framing edit's self-shell renderer.
+- Preserve native renderer component identities through repeated expansion and invalidation.
+- Preserve every text result block, including codemode output after its status header.
+- Require real-component rendering checks to fail if Pi is unavailable instead of skipping.
+
 ## [0.1.0] — 2026-08-28
 
 Initial release. Previously a personal single-file extension named `compact-summary`.
