@@ -68,7 +68,7 @@ test("frame uses the exact current Pi semantic colors", () => {
   }
   assert.ok(calls.some(([color, text]) => color === "accent" && /▸|▾/.test(text)));
   assert.ok(calls.some(([color, text]) => color === "text" && text.includes("Run 2")));
-  assert.ok(calls.some(([color, text]) => color === "muted" && text.includes("tools")));
+  assert.ok(calls.some(([color, text]) => color === "muted" && text.includes("1 tool • 0 notes")));
   assert.ok(calls.some(([color, text]) => color === "borderMuted" && text.includes("┌")));
   assert.equal(themeModule.getResolvedThemeColors("dark").borderMuted, "#768186");
 });
@@ -85,7 +85,7 @@ test("grouped footer is wholly muted, pending/error colors and native padding ar
   assert.ok(pending.includes(themeModule.theme.getBgAnsi("toolPendingBg")));
   assert.ok(lines.some((line) => line.includes(themeModule.theme.getBgAnsi("toolErrorBg"))));
   assert.ok(plain(lines).some((line) => line.startsWith("│  bash ")), "one frame cell + one native tool padding cell");
-  assert.ok(plain(lines).some((line) => line.startsWith("│ Commentary ")), "commentary has no tool background/padding");
+  assert.ok(plain(lines).some((line) => line.startsWith("│  Commentary ")), "commentary and tool shells have the same one-cell horizontal padding");
 });
 
 test("an open pending child retains D10 call/footer/repeated-call/blank ordering", () => {
@@ -109,7 +109,7 @@ test("missing or invalid timing has no invented separators; stopped tools are no
   group.addCommentary(new Pi.AssistantMessageComponent(message("One note")), { timestamp: NaN, durationMs: -1 });
   group.addTool(tool("bash", {}, "interrupted", true), { timing: {}, stopped: true });
   const lines = plain(group.render(120));
-  assert.ok(lines.some((line) => line.includes("1 tools • 1 notes • 0 errors · stopped after 0 tools · kept open (ctrl+o)")));
+  assert.ok(lines.some((line) => line.includes("1 tool • 1 note • 0 errors · stopped after 0 tools · kept open (ctrl+o)")));
   assert.ok(lines.some((line) => line.includes("↳ 1 line (ctrl+o)")));
   assert.ok(!lines.some((line) => /Error ·|0ms|\d\d:\d\d:\d\d|•\s*\(ctrl/.test(line)));
 });
@@ -129,11 +129,11 @@ test("commentary state is per group instance, native final text and thinking con
   assert.equal(view.render(80).length, 2);
   view.setGroupExpanded(true);
   assert.equal((inside as unknown as { __visorThinkExpanded?: boolean }).__visorThinkExpanded, undefined);
-  const open = plain(view.render(80));
-  assert.match(open[0], /^Commentary \*\*Trace\*\*/);
-  assert.match(open[1], /^↳ 2 lines • 10:04:12 • 2s/);
+  const open = plain(view.render(80)).map((line) => line.trimEnd());
+  assert.match(open[0], /^ Commentary \*\*Trace\*\*/);
+  assert.match(open[1], /^ ↳ 2 lines • 10:04:12 • 2s/);
   assert.match(open[2], /Thought/);
-  assert.equal(open[3], "**Trace** the source.");
+  assert.equal(open[3], " **Trace** the source.");
   assert.ok(view.render(80)[3].includes(themeModule.theme.getFgAnsi("muted")));
   assert.equal((inside as unknown as { setExpanded(v: boolean): void }).setExpanded, nativeExpanded);
   const other = new CommentaryRunChild(new Pi.AssistantMessageComponent(message("Other commentary")), currentTheme);
@@ -153,17 +153,48 @@ test("commentary open form and supplied partial timing retain exact rows at 80 a
   for (const width of [80, 120]) {
     const note = new CommentaryRunChild(new Pi.AssistantMessageComponent(message("First note line.\nSecond note line.")), currentTheme, { timestamp: start });
     note.setGroupExpanded(true);
-    assert.deepEqual(plain(note.render(width)), [
-      "Commentary First note line.", "↳ 2 lines • 10:04:12 (ctrl+o)", "First note line.", "Second note line.",
+    assert.deepEqual(plain(note.render(width)).map((line) => line.trimEnd()), [
+      " Commentary First note line.", " ↳ 2 lines • 10:04:12 (ctrl+o)", " First note line.", " Second note line.",
     ]);
     note.setMetadata({ timestamp: NaN, durationMs: 2000 });
-    assert.equal(plain(note.render(width))[1], "↳ 2 lines • 2s (ctrl+o)");
+    assert.equal(plain(note.render(width))[1].trimEnd(), " ↳ 2 lines • 2s (ctrl+o)");
     const group = new RunGroup({ index: 1, keptOpen: true }, currentTheme, true);
     group.addTool(tool("bash", {}, "body"), { timing: { durationMs: 42 } });
     const rows = plain(group.render(width));
     assert.ok(rows.some((line) => line.includes("0 errors · kept open (ctrl+o)")));
     assert.ok(rows.some((line) => line.includes("↳ 1 line • 42ms (ctrl+o)")));
   }
+});
+
+test("every parent count is singular at one and plural otherwise, including stopped-after", () => {
+  for (const count of [0, 1, 2]) {
+    const group = new RunGroup({ index: 1, outcome: "interrupted" }, currentTheme, true);
+    // A stopped tool ensures there is a frame even when the finished count is zero.
+    group.addTool(tool("bash", {}, "stopped", true), { timing: {}, stopped: true });
+    for (let i = 0; i < count; i++) {
+      group.addTool(tool("bash", {}, "failed", true), { timing: {} });
+      group.addCommentary(new Pi.AssistantMessageComponent(message("Note")), { timestamp: NaN });
+    }
+    const text = plain(group.render(120)).join("\n");
+    const tools = count + 1;
+    assert.ok(text.includes(`${tools} ${tools === 1 ? "tool" : "tools"} • ${count} ${count === 1 ? "note" : "notes"} • ${count} ${count === 1 ? "error" : "errors"}`));
+    assert.ok(text.includes(`stopped after ${count} ${count === 1 ? "tool" : "tools"}`));
+  }
+});
+
+test("commentary uses one-cell padding and correct thought row geometry at narrowed child width", () => {
+  const note = new CommentaryRunChild(new Pi.AssistantMessageComponent(message("x".repeat(100), "reasoning")), currentTheme, { timestamp: start, durationMs: 2000 });
+  note.setGroupExpanded(true);
+  const width = 40;
+  const rows = note.render(width);
+  assert.ok(rows[0].startsWith(" "));
+  assert.ok(rows[0].endsWith(" "));
+  assert.ok(rows.every((line) => visibleWidth(line) === width));
+  const thought = note.thoughtLayout(width)[0];
+  assert.equal(thought.start, 1 + plain(rows).slice(1, thought.start).length);
+  assert.equal(thought.height, thought.component.render(width - 2).length);
+  assert.match(stripTerminalSequences(rows[thought.start]), /Thought/);
+  assert.ok(plain(rows).some((line) => line.includes("…")));
 });
 
 test("settled children cache by width, revision and current theme; live updates do not repaint siblings", () => {

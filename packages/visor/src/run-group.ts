@@ -100,9 +100,9 @@ export class RunGroup extends Container {
       + t.fg("text", t.bold(`Run ${this.metadata.index} · ${status}`));
     const duration = timingParts({ durationMs: this.metadata.durationMs }, true)[0];
     const timestamp = timingParts({ timestamp: this.metadata.timestamp })[0];
-    const parts = [`${counts.tools} tools`, `${counts.notes} notes`, ...(duration ? [duration] : []),
+    const parts = [`${counts.tools} ${counts.tools === 1 ? "tool" : "tools"}`, `${counts.notes} ${counts.notes === 1 ? "note" : "notes"}`, ...(duration ? [duration] : []),
       `${counts.errors} ${counts.errors === 1 ? "error" : "errors"}` +
-      (outcome === "interrupted" ? ` · stopped after ${counts.completedTools} tools` : ""), ...(timestamp ? [timestamp] : [])];
+      (outcome === "interrupted" ? ` · stopped after ${counts.completedTools} ${counts.completedTools === 1 ? "tool" : "tools"}` : ""), ...(timestamp ? [timestamp] : [])];
     const kept = this.metadata.keptOpen || outcome !== "success" ? " · kept open" : "";
     const meta = t.fg("muted", parts.join(" • ") + kept + " (ctrl+o)");
     const lines = [border("┌", "┐"), ...wrapTextWithAnsi(header, innerWidth).map(frame)];

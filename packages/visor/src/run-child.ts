@@ -1,5 +1,5 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Box, type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { stripAnsi } from "./format.js";
 import { timingParts, type RecordedTiming, type ThemeSource } from "./run-style.js";
 import { ownsTool, setGroupedToolPresentation, type GroupToolPresentation } from "./tool-display.js";
@@ -127,9 +127,10 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
   /** Slice 3 uses these row ranges to retain the thought line's own click meaning. */
   thoughtLayout(width: number): Array<{ component: ThoughtLine; start: number; height: number }> {
     if (!this.expanded) return [];
-    let start = wrapTextWithAnsi(this.footer(), width).length + 1;
+    const contentWidth = Math.max(1, width - 2);
+    let start = wrapTextWithAnsi(this.footer(), contentWidth).length + 1;
     return this.thoughtLines.map((component) => {
-      const height = component.render(width).length;
+      const height = component.render(contentWidth).length;
       const row = { component, start, height };
       start += height;
       return row;
@@ -149,12 +150,17 @@ export class CommentaryRunChild extends RevisionObserver implements RunChild {
     const t = this.theme();
     const text = this.text();
     const header = t.fg("text", t.bold("Commentary") + (text ? ` ${text.split("\n")[0]}` : ""));
-    const lines = [truncateToWidth(header, width, "…"), ...wrapTextWithAnsi(this.footer(), width)];
+    const contentWidth = Math.max(1, width - 2);
+    const lines = [truncateToWidth(header, contentWidth, "…"), ...wrapTextWithAnsi(this.footer(), contentWidth)];
     if (this.expanded) {
-      lines.push(...this.thoughtLines.flatMap((line) => line.render(width)));
-      lines.push(...wrapTextWithAnsi(t.fg("muted", text), width));
+      lines.push(...this.thoughtLines.flatMap((line) => line.render(contentWidth)));
+      lines.push(...wrapTextWithAnsi(t.fg("muted", text), contentWidth));
     }
-    return lines;
+    // Rev 7: commentary uses the same one-cell horizontal shell as tools,
+    // with no background or vertical padding.
+    const shell = new Box(1, 0);
+    shell.addChild({ render: () => lines, invalidate() {} });
+    return shell.render(width);
   }
   invalidate(): void { this.component.invalidate(); }
   detach(): void { this.restore(); }

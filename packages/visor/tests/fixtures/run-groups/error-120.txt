@@ -1,9 +1,9 @@
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ ▾ ● Run 1 · Worked · recovered                                                                                       │
-│   2 tools • 1 notes • 27s • 1 error • 10:04:12 · kept open (ctrl+o)                                                  │
+│   2 tools • 1 note • 27s • 1 error • 10:04:12 · kept open (ctrl+o)                                                   │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ Commentary Trace the settled duration.                                                                               │
-│ ↳ 2 lines • 10:04:12 • 1s (ctrl+o)                                                                                   │
+│  Commentary Trace the settled duration.                                                                              │
+│  ↳ 2 lines • 10:04:12 • 1s (ctrl+o)                                                                                  │
 │                                                                                                                      │
 │  bash printf hello                                                                                                   │
 │  ↳ 2 lines • 10:04:13 • 136ms (ctrl+o)                                                                               │
