@@ -34,7 +34,7 @@ export default function verifyTurnGroups(pi) {
     pi.sendUserMessage("follow-up multi", { deliverAs: "followUp" });
   });
   const textOf = (message) => typeof message?.content === "string" ? message.content : (message?.content ?? []).filter((block) => block.type === "text").map((block) => block.text).join("\n");
-  pi.registerProvider("visor-verify", { baseUrl: "http://offline.invalid", apiKey: "sandbox-not-a-secret", api: "visor-verify",
+  pi.registerProvider("visor-verify", { baseUrl: "http://offline.invalid", apiKey: "offline", api: "visor-verify",
     models: [{ id: "offline", name: "Offline turn-group verification", reasoning: true, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 }],
     streamSimple(model, context, options) {
       if (context.messages.at(-1)?.role === "user") {
