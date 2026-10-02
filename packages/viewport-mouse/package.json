@@ -48,7 +48,7 @@
   },
   "homepage": "https://github.com/laveesingh/awesome-pi-extensions/tree/main/packages/viewport-mouse#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "publishConfig": {
     "access": "public"
@@ -63,8 +63,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.3",
-    "@earendil-works/pi-tui": "^0.84.3",
+    "@earendil-works/pi-coding-agent": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1",
     "@types/node": "^22.10.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.2"

@@ -3,6 +3,7 @@ import { truncateArg } from "./format.js";
 // ── Tool display: arg summaries ──────────────────────────────────────────────
 export function toolArgSummary(name: string, args: Record<string, unknown>): string {
   switch (name) {
+    case "google_search":
     case "web_search":
       return (args.query as string) ? `"${truncateArg(args.query, 50)}"` : "";
     case "web_fetch":
@@ -24,6 +25,8 @@ export function toolArgSummary(name: string, args: Record<string, unknown>): str
     case "ticket_comment":
     case "ticket_comment_reply":
       return String(args.id ?? "");
+    case "TaskList":
+    case "web_enable":
     case "project_context":
     case "sessions_dispatchable":
       return "";
@@ -36,7 +39,14 @@ export function toolArgSummary(name: string, args: Record<string, unknown>): str
     case "respond":
       return truncateArg(args.text ?? "", 40);
     case "bash":
+    case "powershell":
       return truncateArg(args.command ?? "", 120);
+    case "codemode":
+      return truncateArg(String(args.code ?? "").replace(/\s+/g, " ").trim(), 120);
+    case "TaskCreate":
+      return truncateArg(args.subject ?? "", 60);
+    case "TaskUpdate":
+      return [args.taskId, args.status, args.subject ? truncateArg(args.subject, 60) : ""].filter(Boolean).join(" ");
     case "grep":
       return truncateArg(args.pattern ?? args.query ?? "", 80);
     case "glob":

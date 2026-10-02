@@ -8,10 +8,11 @@ and **published to npm on its own** — this repository is the workspace, not th
 | Package | What it does |
 |---|---|
 | [`pi-viewport-mouse`](packages/viewport-mouse) | Resolves TUI mouse clicks to the transcript components under them and publishes them as events other extensions can subscribe to. Requires Pi's fullscreen TUI mode. |
-| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses `pi-viewport-mouse` for clicks when present. |
+| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi 0.99 native fullscreen clicks; no mouse extension is required. |
 
-The two are designed to work together but neither depends on the other: `pi-viewport-mouse` only
-publishes click events, and `pi-visor` falls back to keyboard expansion when nothing is publishing.
+The packages can work together but neither depends on the other. Pi 0.99 routes component clicks
+natively, so `pi-visor` run frames work without `pi-viewport-mouse`. The mouse package publishes
+additional click events for consumers. Regular mode remains keyboard-only.
 
 ## Install
 
@@ -36,7 +37,7 @@ repository from git would load it twice.
 
 ## Development
 
-Requires Node 20 or newer.
+Requires Node 22.19.0 or newer, matching Pi 0.99.1.
 
 ```bash
 npm install          # installs all workspaces
@@ -68,8 +69,9 @@ TypeScript `NodeNext` convention in imports: write `./thing.js` even though the 
    keyword, `peerDependencies` of `"*"` on `@earendil-works/pi-coding-agent` and
    `@earendil-works/pi-tui`, and `files` listing what to publish.
 3. Add a `README.md`, `CHANGELOG.md` and `LICENSE`.
-4. Add tests under `tests/`. Keep the ones that do not need Pi separate from the ones that do, and
-   skip rather than fail when Pi internals are unavailable.
+4. Add tests under `tests/`. Keep tests that do not need Pi separate from integration checks.
+   Each package may require critical Pi integration checks to fail when Pi internals are unavailable
+   or incompatible, rather than skip and hide a compatibility break.
 5. Add a row to the table above.
 
 ## Publishing

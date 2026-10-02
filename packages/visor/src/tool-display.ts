@@ -1,40 +1,73 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { compactResult, extractToolText, formatDuration, formatTime, notifyOnce, stripAnsi } from "./format.js";
+import { Text, truncateToWidth, wrapTextWithAnsi, stripTerminalSequences, type Component } from "@earendil-works/pi-tui";
+import { timingParts, type RecordedTiming } from "./run-style.js";
+import { compactResult, extractToolText, formatTime, notifyOnce, stripAnsi } from "./format.js";
 import { debugLog } from "./pi-modules.js";
 import { toolArgSummary } from "./tool-args.js";
 
 // ── Tool display ─────────────────────────────────────────────────────────────
-export const UNCOVERED = new Set([
-  "bash",
-  "grep",
-  "web_search",
-  "web_fetch",
-  "fetch_content",
-  "get_search_content",
-  "source_check",
-  "ticket_get",
-  "ticket_list",
-  "ticket_create",
-  "ticket_update",
-  "ticket_comment",
-  "ticket_comment_reply",
-  "ticket_comment_update",
-  "project_context",
-  "sessions_dispatchable",
-  "ticket_dispatch",
-  "session_notify",
-  "session_role",
-  "ack",
-  "respond",
-  "look_at",
-  "interactive_bash",
-  "glob",
-]);
+// Native rendering is opt-out. Add an exclusion only with a documented reason;
+// exclusions take precedence over PASSTHROUGH and have no user-facing setting.
+export const EXCLUDED = new Set<string>();
 
 export type CallRenderer = (args: unknown, theme: unknown, context: unknown) => unknown;
 export type ResultRenderer = (result: unknown, options: unknown, theme: unknown, context: unknown) => unknown;
+
+/** D10 is opt-in per component; flat AWE-1 renderers never see this state. */
+export interface GroupToolPresentation {
+  timing?: RecordedTiming;
+  stopped?: boolean;
+  hasResult?: boolean;
+  callHeader?: (width: number) => string;
+  callBody?: (width: number) => string[];
+}
+const groupedTools = new WeakMap<object, GroupToolPresentation>();
+export function setGroupedToolPresentation(component: object, presentation?: GroupToolPresentation): void {
+  if (presentation) groupedTools.set(component, presentation);
+  else groupedTools.delete(component);
+}
+
+function groupFooter(result: unknown, context: unknown, theme: unknown, presentation: GroupToolPresentation): string {
+  const t = theme as { fg(c: string, s: string): string; bold(s: string): string };
+  const ctx = context as { state?: Record<string, unknown>; isPartial?: boolean; isError?: boolean };
+  if (!presentation.hasResult || ctx?.isPartial) return t.fg("muted", "↳ … running");
+  const text = extractToolText(result);
+  const lines = text ? text.split("\n") : [];
+  const count = lines.filter((line) => line.trim()).length || lines.length;
+  let label = `↳ ${count} line${count === 1 ? "" : "s"}`;
+  const r = result as { details?: { exitCode?: number; exit_code?: number } };
+  const exit = r.details?.exitCode ?? r.details?.exit_code ?? text.match(/(?:Exit code:|Command exited with code)\s*(-?\d+)/i)?.[1];
+  const error = ctx?.isError && !presentation.stopped;
+  if (error && exit !== undefined) label += ` · exit ${exit}`;
+  const startedAt = ctx?.state?.startedAt as number | undefined;
+  const timing = presentation.timing ? timingParts(presentation.timing)
+    : [formatTime(startedAt), settledDuration(ctx, startedAt)].filter(Boolean);
+  const footer = label + timing.map((part) => ` • ${part}`).join("") + " (ctrl+o)";
+  return (error ? t.fg("text", t.bold("Error · ")) : "") + t.fg("muted", footer);
+}
+
+/** Lab .output repeats the call as plain muted text, not title/accent styling. */
+function repeatedGroupCall(header: string, theme: unknown): string {
+  return (theme as { fg(color: string, text: string): string }).fg("muted", stripTerminalSequences(header));
+}
+
+function groupedResult(
+  result: unknown, options: unknown, theme: unknown, context: unknown,
+  presentation: GroupToolPresentation, body: (width: number) => string[],
+): Component {
+  const expanded = !!(options as { expanded?: boolean })?.expanded;
+  // Freeze live duration at the settled renderer invocation, not a later draw.
+  const footer = groupFooter(result, context, theme, presentation);
+  return {
+    render(width) {
+      if (!expanded) return wrapTextWithAnsi(footer, width);
+      const header = presentation.callHeader?.(width) ?? "";
+      return [...wrapTextWithAnsi(footer, width), ...wrapTextWithAnsi(repeatedGroupCall(header, theme), width), "", ...body(width)];
+    },
+    invalidate() {},
+  };
+}
 
 /**
  * How long the call took, frozen at the first render that carries a settled
@@ -74,23 +107,38 @@ export function collapsedBlock(
   return new Text(t.fg("muted", `↳ ${what}`) + t.fg("dim", suffix), 0, 0);
 }
 
-export function createCallRenderer(name: string): CallRenderer {
+export function createCallRenderer(name: string, presentation?: GroupToolPresentation): CallRenderer {
   return (args: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string; bold: (s: string) => string };
-    const ctx = context as { state?: Record<string, unknown> } | undefined;
-    if (ctx?.state && typeof ctx.state.startedAt !== "number") ctx.state.startedAt = Date.now();
+    const ctx = context as { state?: Record<string, unknown>; executionStarted?: boolean; expanded?: boolean } | undefined;
+    if (ctx?.executionStarted === true && ctx.state && typeof ctx.state.startedAt !== "number") {
+      ctx.state.startedAt = Date.now();
+    }
     const summary = toolArgSummary(name, (args as Record<string, unknown>) ?? {});
     let line = t.fg("toolTitle", t.bold(name));
     if (summary) line += ` ${t.fg("accent", summary)}`;
-    return new Text(line, 0, 0);
+    if (!presentation) return new Text(line, 0, 0);
+    presentation.callHeader = () => line;
+    presentation.callBody = () => [];
+    return {
+      render(width: number) {
+        return [truncateToWidth(line, width, "…"), ...(!presentation.hasResult
+          ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded ? [...wrapTextWithAnsi(repeatedGroupCall(line, theme), width), ""] : [])] : [])];
+      },
+      invalidate() {},
+    };
   };
 }
 
-export function createResultRenderer(): ResultRenderer {
+export function createResultRenderer(presentation?: GroupToolPresentation): ResultRenderer {
   return (result: unknown, options: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string };
     const opts = options as { expanded?: boolean; isPartial?: boolean };
     const ctx = context as { state?: Record<string, unknown> } | undefined;
+    if (presentation) {
+      return groupedResult(result, options, theme, context, presentation, (width) =>
+        wrapTextWithAnsi(t.fg("muted", extractToolText(result)), width));
+    }
     if (opts?.isPartial) return new Text(t.fg("warning", "…"), 0, 0);
     const startedAt = ctx?.state?.startedAt as number | undefined;
     const dur = settledDuration(ctx, startedAt);
@@ -110,55 +158,121 @@ export const PASSTHROUGH = new Set(["read", "edit", "write", "ls", "find"]);
 /**
  * Passthrough: Pi keeps the call line and the expanded body (edit/write diffs,
  * read previews), we own the collapsed state and the footer. `orig` is whatever
- * Pi itself resolved for this component — including the built-in renderer, which
- * is where the diffs actually live, so this must be given the component's own
- * resolved renderer rather than a registered tool definition.
+ * Pi itself resolved from the component's toolDefinition. Pi 0.99's edit renderer
+ * also updates the native call component with the settled diff, even while our
+ * result is collapsed. Preserve native lastComponent identities across wrappers.
  */
-export function createPassthroughResultRenderer(orig: ResultRenderer | undefined): ResultRenderer {
+const nativeComponent = Symbol("visorNativeComponent");
+type WrappedComponent = Component & { [nativeComponent]?: Component };
+
+function nativeContext(context: unknown): unknown {
+  const ctx = context as { lastComponent?: WrappedComponent } | undefined;
+  if (!ctx) return context;
+  return { ...ctx, lastComponent: ctx.lastComponent?.[nativeComponent] ?? ctx.lastComponent };
+}
+
+function keepNative<T extends object>(component: T, native: unknown): T {
+  if (native && typeof (native as Component).render === "function") {
+    (component as WrappedComponent)[nativeComponent] = native as Component;
+  }
+  return component;
+}
+
+export function createPassthroughResultRenderer(orig: ResultRenderer | undefined, presentation?: GroupToolPresentation): ResultRenderer {
   return (result: unknown, options: unknown, theme: unknown, context: unknown) => {
     const t = theme as { fg: (c: string, s: string) => string };
     const opts = options as { expanded?: boolean; isPartial?: boolean };
     const ctx = context as { state?: Record<string, unknown> } | undefined;
-    if (opts?.isPartial) return new Text(t.fg("warning", "…"), 0, 0);
+    if (opts?.isPartial && !presentation) return new Text(t.fg("warning", "…"), 0, 0);
     const startedAt = ctx?.state?.startedAt as number | undefined;
     const dur = settledDuration(ctx, startedAt);
-    if (!opts?.expanded) return collapsedBlock(t, result, extractToolText(result), startedAt, dur);
+    const origOut = (() => {
+      try { return orig ? orig(result, options, theme, nativeContext(context)) : undefined; } catch { return undefined; }
+    })();
+    if (presentation) {
+      return keepNative(groupedResult(result, options, theme, context, presentation, (width) => {
+        const callBody = presentation.callBody?.(width) ?? [];
+        let resultBody = (origOut as Component | undefined)?.render(width) ?? [];
+        if (resultBody.every((line) => !stripAnsi(line).trim())) {
+          resultBody = wrapTextWithAnsi(t.fg("dim", extractToolText(result)), width);
+        }
+        return [...callBody, ...resultBody];
+      }), origOut);
+    }
+    if (!opts?.expanded) {
+      return keepNative(collapsedBlock(t, result, extractToolText(result), startedAt, dur) as object, origOut);
+    }
 
     const ts = formatTime(startedAt);
-    const origOut = (() => {
-      try { return orig ? orig(result, options, theme, context) : undefined; } catch { return undefined; }
-    })();
-    const footLine = t.fg("dim", `— ${ts ? ts + " • " : ""}${dur || "0ms"}`);
+    const timing = [ts, dur].filter(Boolean).join(" • ");
+    const footer = timing ? [t.fg("dim", `— ${timing}`)] : [];
     const rawBody = () => (extractToolText(result) || "").split("\n").map((l) => t.fg("dim", l));
     if (!origOut || typeof (origOut as { render?: unknown }).render !== "function") {
-      return new Text([...rawBody(), footLine].join("\n"), 0, 0);
+      return new Text([...rawBody(), ...footer].join("\n"), 0, 0);
     }
-    return {
+    return keepNative({
       render: (width: number) => {
         let lines: string[] = [];
         try { lines = (origOut as { render: (w: number) => string[] }).render(width) ?? []; } catch {}
-        // Pi's edit/write renderers write their diff into the CALL component and
-        // can legitimately return nothing. Only substitute the raw text when the
+        // Pi 0.99's edit diff and write content live in the CALL component, so
+        // the native result can legitimately be empty. Substitute raw text when the
         // expansion would otherwise be empty, so we never hide the output.
         if (lines.every((l) => !stripAnsi(l).trim())) lines = rawBody();
-        return [...lines, footLine];
+        return [...lines, ...footer];
       },
       invalidate() { try { (origOut as { invalidate?: () => void }).invalidate?.(); } catch {} },
-    };
+    }, origOut);
   };
 }
 
 /**
- * Start the clock when the call line is drawn. Our own call renderer does this
- * inline; passthrough tools keep Pi's call renderer, so it has to be wrapped or
- * every passthrough block reports a 0ms duration.
+ * Start the clock only after Pi marks a live execution as started. Rebuilt
+ * transcript components never receive that mark, so they must not invent a
+ * resume clock or duration. Passthrough calls need the same timing guard.
  */
-export function withTiming(orig: CallRenderer | undefined): CallRenderer | undefined {
+export function withTiming(orig: CallRenderer | undefined, selfShell = false, presentation?: GroupToolPresentation): CallRenderer | undefined {
   if (!orig) return orig;
   return (args: unknown, theme: unknown, context: unknown) => {
-    const ctx = context as { state?: Record<string, unknown> } | undefined;
-    if (ctx?.state && typeof ctx.state.startedAt !== "number") ctx.state.startedAt = Date.now();
-    return orig(args, theme, context);
+    const ctx = context as { state?: Record<string, unknown>; expanded?: boolean; executionStarted?: boolean } | undefined;
+    if (ctx?.executionStarted === true && ctx.state && typeof ctx.state.startedAt !== "number") {
+      ctx.state.startedAt = Date.now();
+    }
+    const native = orig(args, theme, nativeContext(context)) as Component;
+    const nativeLines = (width: number) => {
+      const children = (native as Component & { children?: Component[] }).children;
+      return selfShell && Array.isArray(children) ? children.flatMap((child) => child.render(width)) : native.render(width);
+    };
+    if (presentation) {
+      const n = native as Component & { text?: string; children?: Array<{ text?: string }> };
+      presentation.callHeader = (width) => (n.text ?? n.children?.[0]?.text)?.split("\n")[0]
+        ?? nativeLines(width).find((line) => stripAnsi(line).trim()) ?? "";
+      presentation.callBody = (width) => {
+        const lines = nativeLines(width).slice(wrapTextWithAnsi(presentation.callHeader!(width), width).length);
+        while (lines.length && !stripAnsi(lines[0]).trim()) lines.shift();
+        while (lines.length && !stripAnsi(lines.at(-1)!).trim()) lines.pop();
+        return lines;
+      };
+    }
+    return keepNative({
+      render(width: number) {
+        // Edit owns a Box in Pi 0.99's self shell. Visor supplies the outer Box,
+        // so render its children without adding a second frame or padding.
+        // Pi's shrinkwrap can install a second pi-tui copy. Use the public
+        // children contract rather than instanceof across module identities.
+        if (presentation) {
+          const t = theme as { fg(c: string, s: string): string };
+          const header = presentation.callHeader!(width);
+          return [truncateToWidth(header, width, "…"), ...(!presentation.hasResult
+            ? [t.fg("muted", "↳ … running"), ...(ctx?.expanded
+              ? [...wrapTextWithAnsi(repeatedGroupCall(header, theme), width), "", ...presentation.callBody!(width)] : [])] : [])];
+        }
+        const lines = nativeLines(width);
+        // Native edit/write calls include body previews. Only the header belongs
+        // in the two-line collapsed form; retain the full native body on expand.
+        return ctx?.expanded ? lines : lines.filter((line) => stripAnsi(line).trim()).slice(0, 1);
+      },
+      invalidate() { native.invalidate?.(); },
+    }, native);
   };
 }
 
@@ -168,11 +282,9 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 //
 //   Every transcript block is a ToolExecutionComponent. It asks itself three
 //   questions while drawing — hasRendererDefinition(), getCallRenderer(),
-//   getResultRenderer() — and those already resolve Pi's own precedence between
-//   the registered tool definition and the built-in one
-//   (`toolDefinition.renderX ?? builtInToolDefinition.renderX`). Wrapping the
-//   component's methods therefore sits downstream of every source of renderers:
-//   built-ins, extension tools and MCP tools alike.
+//   getResultRenderer() — which resolve toolDefinition's renderers in Pi 0.99.
+//   Wrapping the component's methods sits downstream of every source of tool
+//   definitions: built-ins, extension tools and MCP tools alike.
 //
 //   The registry is the wrong place. `_toolDefinitions` and `_toolRegistry` are
 //   rebuilt on every refresh, so anything captured there goes stale, and
@@ -180,9 +292,8 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 //   nothing to miss and nothing to keep in sync.
 //
 //   It also gives passthrough tools something the registry cannot: the ORIGINAL
-//   resolved renderer, `origGetResult.call(this)`. For read/edit/write the diff
-//   and preview renderers live on builtInToolDefinition, which never appears in
-//   the registry at all.
+//   resolved renderer, `origGetResult.call(this)`, together with the native call
+//   renderer. On Pi 0.99 these carry read previews and edit/write bodies.
 //
 // The patch must be installed before the first component is constructed, because
 // the constructor calls getRenderShell() to pick its container. Extension load
@@ -190,7 +301,7 @@ export function withTiming(orig: CallRenderer | undefined): CallRenderer | undef
 
 /** Tools whose rendering this extension owns end to end. */
 export function ownsTool(name: string): boolean {
-  return UNCOVERED.has(name) || PASSTHROUGH.has(name);
+  return !EXCLUDED.has(name);
 }
 
 let componentPatched = false;
@@ -217,7 +328,7 @@ export function patchToolExecutionComponent(): boolean {
     return false;
   }
 
-  type Self = { toolName: string };
+  type Self = { toolName: string; result?: unknown };
 
   // Owned tools always take the renderer path, never the raw formatToolExecution()
   // text dump — that fallback is what printed MCP results as raw JSON.
@@ -233,15 +344,21 @@ export function patchToolExecutionComponent(): boolean {
   };
 
   proto.getCallRenderer = function (this: Self) {
-    if (UNCOVERED.has(this.toolName)) return createCallRenderer(this.toolName);
-    if (PASSTHROUGH.has(this.toolName)) return withTiming(origGetCall.call(this));
-    return origGetCall.call(this);
+    if (!ownsTool(this.toolName)) return origGetCall.call(this);
+    const presentation = groupedTools.get(this);
+    if (presentation) presentation.hasResult = this.result !== undefined;
+    if (PASSTHROUGH.has(this.toolName)) {
+      return withTiming(origGetCall.call(this), origGetShell.call(this) === "self", presentation)
+        ?? createCallRenderer(this.toolName, presentation);
+    }
+    return createCallRenderer(this.toolName, presentation);
   };
 
   proto.getResultRenderer = function (this: Self) {
-    if (UNCOVERED.has(this.toolName)) return createResultRenderer();
-    if (PASSTHROUGH.has(this.toolName)) return createPassthroughResultRenderer(origGetResult.call(this));
-    return origGetResult.call(this);
+    if (!ownsTool(this.toolName)) return origGetResult.call(this);
+    const presentation = groupedTools.get(this);
+    if (PASSTHROUGH.has(this.toolName)) return createPassthroughResultRenderer(origGetResult.call(this), presentation);
+    return createResultRenderer(presentation);
   };
 
   (proto as Record<string, unknown>).__visorToolDisplay = true;

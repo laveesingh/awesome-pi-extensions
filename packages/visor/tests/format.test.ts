@@ -4,11 +4,26 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compactResult, formatDurShort, formatTokensShort, wrapPlain } from "../src/format.js";
+import { compactResult, extractToolText, formatDurShort, formatTokensShort, wrapPlain } from "../src/format.js";
 
 const asResult = (text: string, details?: unknown) => ({
 	content: [{ type: "text", text }],
 	details,
+});
+
+test("tool text includes every text block, including codemode output after its status header", () => {
+  assert.equal(extractToolText({ content: [
+    { type: "image", data: "fixture" },
+    { type: "text", text: "Script completed\nOutput:" },
+    { type: "text", text: "" },
+    { type: "text", text: "first output" },
+    { type: "audio", data: "fixture" },
+    { type: "text", text: "last output" },
+  ] }), "Script completed\nOutput:\n\nfirst output\nlast output");
+  assert.equal(extractToolText({ content: [] }), "");
+  assert.equal(extractToolText({ content: [{ type: "text", text: "" }, { type: "text", text: "" }] }), "\n");
+  assert.equal(extractToolText({ content: [{ type: "image", data: "fixture" }] }), "");
+  assert.equal(extractToolText({ content: [null, { type: "text", text: 42 }] }), "");
 });
 
 test("plain text is not summarised — it keeps its line preview", () => {

@@ -1,114 +1,144 @@
 # pi-visor
 
-A heads-up layer for the [Pi coding agent](https://pi.dev) TUI.
+A heads-up layer for the [Pi coding agent](https://pi.dev) transcript.
 
-Pi's transcript grows fast: every tool call prints its whole output, every thinking run prints its
-whole reasoning, and a long session becomes a wall you have to scroll past. `pi-visor` collapses all
-of that to two lines per block and puts the detail one click away.
+Each run with tools has one bounded frame. Open the frame to see compact commentary and tool
+blocks, then open any child for its full text or native diff. The final answer stays visible below
+it, as Pi renders it.
 
 ```
-● Worked (9s • ↑ 66K • ⚡ 0 • ↓ 335)          ← turn bar: live tokens, duration
+┌──────────────────────────────────────────────────────────────────────┐
+│ ▸ ● Run 1 · Worked                                                   │
+│   8 tools • 3 notes • 27s • 0 errors • 10:04:12 (ctrl+o)             │
+└──────────────────────────────────────────────────────────────────────┘
 
-● Thought (2s • ↓ 120) (ctrl+o)               ← one line per thinking run
-
-bash echo hello && ls -la | head -5
-↳ 6 lines • 11:51:31 • 136ms (ctrl+o)         ← two lines per tool call
-
-ticket_get GOL-264
-↳ GOL-264 · "Compact tool output" · done · spec • 11:51:34 • 179ms (ctrl+o)
+The final response remains outside the frame.
 ```
-
-Click a block — or press `ctrl+o` — to expand it.
 
 ## What it does
 
-Four surfaces, one extension. They share a footer grammar and an expand/collapse contract, and that
-is the whole scope: **`pi-visor` changes how a session reads, never how the agent behaves.**
-
 | Surface | What you get |
 |---|---|
-| **Turn bar** | `● Working / Worked` with live duration and `↑ in / ⚡ cached / ↓ out` token counts |
-| **Thinking** | One `● Thought (dur • ↓ tokens)` line per thinking run, expandable to the full reasoning |
-| **Tool blocks** | Call line + `↳ N lines • hh:mm:ss • duration (ctrl+o)`. No output preview |
-| **Expansion** | Per-block via click, or all at once with `ctrl+o` |
+| Run frame | Header and counts; one layer opens to compact children, a second opens each child |
+| Commentary | Header + line-count footer; expansion shows muted wrapped text and the managed thought line if present |
+| Tools | Two-line call/footer; expansion keeps the footer, repeats the call, then shows the full body or native diff |
+| Thinking | Managed thought summaries with their own expansion controls |
+| Turn bar | Live `Working / Worked` duration and input/cache/output token counts |
+| Final answer | Native Pi rendering, never hidden in the run frame |
+
+There is one transcript scroll, never an inner scroll region. Frames number from 1 in the current
+chat. A run without tools creates no frame.
+
+### Membership and boundaries
+
+- A user prompt closes the current frame. Steering and follow-up prompts therefore have separate
+  frames even when Pi handles them in one agent cycle.
+- Only visible assistant text counts as a commentary note. Tool-only assistant messages add no
+  empty commentary block. Thinking-only messages show the existing managed thought line without
+  a note count.
+- Top-level tools count; nested codemode calls do not create extra transcript children. Status,
+  custom and other auxiliary rows keep their order without adding tools or notes.
+- The provisional streaming answer stays below the frame. It moves inside only when it is known
+  to precede tool use. The final text answer remains outside and native.
+
+### Expansion
+
+In **fullscreen mode**, click:
+
+- The header, metadata, declared separators and group-end/border rows to toggle only the parent layer. Child states are kept. Inter-child gaps and child-region side columns do nothing.
+- A tool or commentary child to toggle only that child.
+- A managed thought line to toggle only its reasoning, including a thinking-only member.
+
+**Ctrl+O** opens both layers; the next press closes both. Later arriving children inherit that
+global choice. Commentary expansion is separate from thinking expansion. For a thinking-only
+member, Ctrl+O keeps Pi's existing reasoning-expansion meaning.
+
+Pi 0.99 routes these clicks natively: `pi-viewport-mouse` is **not required**. Both packages can
+still be loaded together; visor defers grouped clicks from the legacy event route so native
+routing performs one toggle. Regular mode has no transcript mouse route; Ctrl+O still works.
+
+### Live runs and settlement
+
+A live frame starts open with compact children. At final `agent_settled`, each untouched successful
+frame collapses once. A user-touched, errored or interrupted frame keeps its exact state, including
+manual closure. A later abort marks only the frame open at that abort; earlier frames are not
+falsely labeled Interrupted. Aborted pending tools count as stopped, not errors.
+
+### Rebuilds and timing
+
+Resume, compaction and tree navigation rebuild collapsed frames and children. Expansion state is
+not persisted. Live timing uses execution/streaming clocks. Rebuilt tool/run timing comes from
+recorded message timestamps: a rebuilt tool shows its tool-result timestamp, but its execution
+duration is always omitted, even for a single call. Real tool start/end is not persisted, and a
+parallel batch's completion time must not become every tool's duration. Run timing remains the
+first-to-last message span. Unavailable values/separators are omitted; commentary streaming duration
+is omitted after rebuild unless it was recorded.
 
 ### Tool coverage
 
-Built-ins, extension tools and MCP tools are all covered, in two styles:
+Every tool is owned by default, including unknown extension and MCP names:
 
-- **Replaced** — `bash`, `grep`, `glob`, web tools, and MCP tools get a uniform call line and footer.
-- **Passthrough** — `read`, `edit`, `write`, `ls`, `find` keep Pi's own call line and expanded body,
-  so **edit and write diffs survive**; only the collapsed state and footer are ours.
+- **Generic** tools use a uniform call/footer and retain all text result blocks, including
+  codemode output after its status header.
+- **Passthrough** `read`, `edit`, `write`, `ls`, `find` retain native headers and expanded bodies.
+  Edit diffs and write content survive repeated expansion.
+- The source-level **`EXCLUDED`** set is empty. An explicit exclusion preserves native rendering,
+  shell and fallback behavior, and takes precedence over passthrough. There is no user-facing
+  exclusion setting; additions require a documented reason.
 
-A tool `pi-visor` does not own renders exactly as Pi renders it, untouched.
-
-### Structured results
-
-Tools returning JSON get a summary instead of a line count, so a tracker call reads
-`↳ 151 items · GOL-93, GOL-98, … ` rather than three lines of `{`. The object is read from
-`details.result` where present rather than re-parsed from text, because some tools truncate their
-text output and hand you invalid JSON.
+Flat tool rendering remains available when grouping cannot install. Flat structured JSON results
+keep visor's compact identity/count summaries instead of raw JSON previews. Grouped footers use
+line counts and wholly muted metadata, with pending/error forms matching the frame grammar.
 
 ## Install
 
-```bash
+```sh
 pi install npm:pi-visor
+pi --tui-mode fullscreen   # for native clicks; Ctrl+O also works in regular mode
 ```
 
-For click-to-expand you also need mouse events, which means both of these:
-
-```bash
-pi install npm:pi-viewport-mouse   # routes clicks to components
-pi --tui-mode fullscreen           # Pi only captures mouse in fullscreen
-```
-
-Neither is required. Without them `ctrl+o` still expands everything, and nothing else changes —
-`pi-visor` degrades to a keyboard-only tool rather than breaking.
-
-> Pi packages run with full system access. Extensions execute arbitrary code. Read the source before
-> installing anything, including this.
+> Pi packages execute arbitrary code with full system access. Read the source before installing.
 
 ## Requirements
 
-- **Node 20 or newer.**
-- **Pi 0.84.x.** This patches Pi internals (see Stability), so a major Pi change can break it.
-- **For clicks only:** `pi-viewport-mouse` and Pi's fullscreen TUI, which is *not* Pi's default.
-
-## Expansion
-
-Both routes drive the same state, so they stay in sync:
-
-- **Click** a tool block or a thought line to toggle just that one.
-- **`ctrl+o`** toggles everything at once (Pi's own `app.tools.expand` binding).
-
-Clicking an assistant message that has no thinking does nothing and does not consume the click —
-other extensions still see it.
+- Node **22.19.0 or newer**.
+- Pi **0.99.1**. This package patches private Pi seams; updates can break compatibility.
+- Fullscreen TUI mode for transcript clicks. No extra mouse extension is required.
 
 ## Stability
 
-This package patches two Pi internals, each isolated to one file:
+| File | Compatibility seam |
+|---|---|
+| `src/run-integration.ts` | Live InteractiveMode UI binding, transcript membership/rebuild, direct-child consumers |
+| `src/run-group.ts` | Four-column bounded frame and native coordinate routing |
+| `src/run-child.ts` | Per-instance commentary state and contextual native tool shell |
+| `src/tool-display.ts` | ToolExecutionComponent call/result/shell resolution |
+| `src/thinking.ts` | AssistantMessageComponent thinking rendering |
 
-| File | Patches | Breaks if |
-|---|---|---|
-| `src/tool-display.ts` | `ToolExecutionComponent` renderer resolution | Pi renames those methods |
-| `src/thinking.ts` | `AssistantMessageComponent.updateContent` | Pi restructures thinking rendering |
+Static imports resolve to Pi's live module instance through its extension loader. Grouping uses the
+actual captured chat container, not a guessed container found by tree shape. Compatibility failures
+leave the transcript flat and notify once. Reload/shutdown restore instance hooks rather than
+stacking wrappers. Settled child output is cached by width, revision and current theme.
 
-Both reach Pi through a **static ESM import** of `@earendil-works/pi-coding-agent`. That matters:
-Pi loads extensions through jiti with an alias to the running `dist`, so a static import resolves to
-the very module instance the live agent is using. `createRequire` does not — Pi is pure ESM, so its
-modules never enter the CJS cache, and requiring the file by path mints a second, unrelated copy
-whose prototypes nothing ever calls.
+## Development and verification
 
-The tool-block patch deliberately sits on the **component**, not the tool registry. Pi rebuilds its
-registry maps on every refresh, so anything captured there goes stale; the component asks for its
-renderers on every render, so there is nothing to miss and no registration race.
+```sh
+cd packages/visor
+npm run check
+```
+
+The test suite includes independent 80/120-column golden strings, real native component rendering,
+recorded Pi handler-order replay and isolated native/combined mouse regressions. Critical integration
+checks fail rather than silently skip on incompatible Pi internals.
+
+Offline independent capture setup: [`tests/fixtures/verify-turn-groups.md`](tests/fixtures/verify-turn-groups.md).
+Native operation recorder: [`tests/fixtures/native-order/README.md`](tests/fixtures/native-order/README.md).
+Sandbox web/Task fixtures are renderer evidence, not production integrations or real test claims.
 
 ## Debugging
 
-Set `PI_DEBUG=1` to append diagnostics to `/tmp/pi-visor.log`.
-
-If tool blocks render Pi-native, the patch did not install and the extension says so out loud rather
-than failing silently.
+Set `PI_DEBUG=1` for existing visor diagnostics in `/tmp/pi-visor.log`. If grouping cannot install,
+its warning identifies the compatibility seam and the transcript remains flat.
 
 ## License
 
