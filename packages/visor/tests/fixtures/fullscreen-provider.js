@@ -60,7 +60,7 @@ export default function fullscreenProvider(pi) {
     { name: "web_enable", arguments: {} },
   ];
   pi.registerProvider("visor-fixture", {
-    baseUrl: "http://offline.invalid", apiKey: "sandbox-not-a-secret", api: "visor-fixture",
+    baseUrl: "http://offline.invalid", apiKey: "offline", api: "visor-fixture",
     models: [{ id: "offline", name: "Visor offline fixture", reasoning: false, input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 }],
     streamSimple(model, context, options) {

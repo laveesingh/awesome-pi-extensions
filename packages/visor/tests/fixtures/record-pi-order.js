@@ -164,7 +164,7 @@ export default function recordPiOrder(pi) {
   });
   let callSerial = 0;
   const textOf = (m) => typeof m?.content === "string" ? m.content : (m?.content ?? []).filter((block) => block.type === "text").map((block) => block.text).join("\n");
-  pi.registerProvider("order-fixture", { baseUrl: "http://offline.invalid", apiKey: "sandbox-not-a-secret", api: "order-fixture",
+  pi.registerProvider("order-fixture", { baseUrl: "http://offline.invalid", apiKey: "offline", api: "order-fixture",
     models: [{ id: "offline", name: "Offline native-order fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 }],
     streamSimple(model, context, options) {
       const last = context.messages.at(-1);
