@@ -1,6 +1,6 @@
 {
   "name": "pi-visor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A heads-up layer for the Pi coding agent TUI: a live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or ctrl+O. Requires Pi's fullscreen TUI mode for click support.",
   "type": "module",
   "main": "./index.ts",

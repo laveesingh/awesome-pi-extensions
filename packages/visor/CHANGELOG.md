@@ -3,14 +3,14 @@
 All notable changes to `pi-visor` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-10-02
 
-- Retain the captured live mode/UI across reload and recapture for the new extension owner before
-  rebuilding, so grouping survives `/reload` and subsequent runs without stacked hooks.
-- Omit all rebuilt per-tool execution durations, including single calls; use each tool-result
-  timestamp for its clock. Preserve live frozen timing and recorded run/message spans.
-- Ignore inter-child gap rows and child-region side columns; only declared frame chrome toggles
-  the parent, and ignored clicks do not mark it touched.
+Requires Pi 0.99.1 and Node 22.19.0 or newer.
+
+### Run frames
+
+Each agent run with tool calls now collapses into one bounded frame that opens in two layers:
+first into its commentary and tool blocks, then each block on its own.
 
 - Group tool runs into bounded two-layer frames; retain native final answers below them, truthful
   recorded timing on rebuild, and collapsed-state reset on resume/compaction/tree navigation.
@@ -26,6 +26,14 @@ All notable changes to `pi-visor` are documented here. This project follows
   singular counts at one.
 - Add independent frame goldens, real Pi native-order replay, interaction regressions and an offline
   multistate verification fixture.
+- Retain the captured live mode/UI across reload and recapture for the new extension owner before
+  rebuilding, so grouping survives `/reload` and subsequent runs without stacked hooks.
+- Omit all rebuilt per-tool execution durations, including single calls; use each tool-result
+  timestamp for its clock. Preserve live frozen timing and recorded run/message spans.
+- Ignore inter-child gap rows and child-region side columns; only declared frame chrome toggles
+  the parent, and ignored clicks do not mark it touched.
+
+### Tool collapse
 
 - Own every tool by default, including unknown names. Replace the inclusion list with an empty,
   source-level `EXCLUDED` set; exclusions preserve native rendering and take precedence over
