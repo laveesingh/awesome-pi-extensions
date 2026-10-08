@@ -6,6 +6,7 @@ import { before, test } from "node:test";
 import * as Pi from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { RunGroup } from "../src/run-group.js";
+import { RunGroup as BaselineRunGroup } from "./fixtures/baseline-run-group.js";
 import { CommentaryRunChild } from "../src/run-child.js";
 import { type RunTheme } from "../src/run-style.js";
 import { EXCLUDED, patchToolExecutionComponent } from "../src/tool-display.js";
@@ -222,6 +223,179 @@ test("settled children cache by width, revision and current theme; live updates 
   group.invalidate();
   group.render(120);
   assert.equal(renders, 5);
+});
+
+test("settled framed rows skip repeated styling while a sibling streams and parent metadata updates", () => {
+  const base = currentTheme();
+  let borders = 0;
+  const recording: RunTheme = { fg: (color, text) => {
+    if (color === "borderMuted" && text === "│") borders++;
+    return base.fg(color, text);
+  }, bg: base.bg.bind(base), bold: base.bold.bind(base) };
+  const group = new RunGroup({ index: 1, live: true }, () => recording);
+  const settled = group.addTool(tool("bash", {}, Array.from({ length: 100 }, (_, i) => `\x1b[32msettled ${i} 界\x1b[0m`).join("\n")));
+  settled.setExpanded(true);
+  const live = tool("bash", {}, undefined);
+  group.addTool(live).setExpanded(true);
+  let renders = 0;
+  const render = settled.render.bind(settled);
+  settled.render = (width) => { renders++; return render(width); };
+  const first = group.render(120);
+  const settledRows = group.childRows.find((row) => row.child === settled)!;
+  const firstFrame = first.slice(settledRows.start, settledRows.start + settledRows.height);
+  const before = borders;
+  live.updateResult({ content: [{ type: "text", text: "partial sibling changed" }], isError: false }, true);
+  group.setMetadata({ durationMs: 5000 });
+  const next = group.render(120);
+  const nextRows = group.childRows.find((row) => row.child === settled)!;
+  assert.equal(renders, 1, "existing raw child cache still owns settled rendering");
+  assert.deepEqual(next.slice(nextRows.start, nextRows.start + nextRows.height), firstFrame, "direct ANSI child frame bytes stay identical");
+  assert.ok(next.join("").includes("5s"), "parent metadata remains fresh");
+  assert.ok(borders - before < settledRows.height * 2, "unchanged settled rows must not repeat per-line frame styling");
+});
+
+function cacheParityFixture(Group: typeof RunGroup | typeof BaselineRunGroup) {
+  let theme = currentTheme();
+  const group = new Group({ index: 1, live: true, timestamp: start, durationMs: 1000 }, () => theme);
+  const live = tool("bash", { command: "synthetic partial" });
+  group.addTool(live).setExpanded(true);
+  const c = tool("bash", { command: "synthetic settled" }, "\x1b[48;2;20;30;40m\x1b[32mANSI 界 é\x1b[0m\nsecond line");
+  const settled = group.addTool(c, { timing: { timestamp: start, durationMs: 100 } });
+  settled.setExpanded(true);
+  const assistant = new Pi.AssistantMessageComponent(message("note first\nnote second", "thought body 界"));
+  const note = group.addCommentary(assistant, { timestamp: start, durationMs: 100 });
+  note.setGroupExpanded(true);
+  const auxiliary = new Text("auxiliary first", 0, 0);
+  group.addRow(auxiliary);
+  return { group, c, settled, live, assistant, note, auxiliary, setTheme: (next: RunTheme) => { theme = next; } };
+}
+function cacheParitySnapshot(group: RunGroup | BaselineRunGroup, width: number) {
+  const lines = group.render(width);
+  return { lines, visibleWidths: lines.map(visibleWidth), counts: group.counts,
+    rows: group.childRows.map((row) => ({ start: row.start, height: row.height, width: row.width, kind: row.child.kind })) };
+}
+for (const width of [1, 4, 20, 80, 120]) {
+  test(`framed cache matches frozen baseline ANSI bytes and row geometry through state transitions at width ${width}`, async (t) => {
+    let now = start;
+    t.mock.method(Date, "now", () => now);
+    const candidate = cacheParityFixture(RunGroup), baseline = cacheParityFixture(BaselineRunGroup);
+    const both = [candidate, baseline];
+    const check = (label: string) => {
+      const actual = cacheParitySnapshot(candidate.group, width);
+      assert.deepEqual(actual, cacheParitySnapshot(baseline.group, width), label);
+      assert.ok(actual.visibleWidths.every((value) => value <= width));
+      return actual;
+    };
+    check("first draw"); check("warm reuse");
+    const previousStart = candidate.group.childRows.find((row) => row.child === candidate.settled)!.start;
+    for (const f of both) f.live.updateResult({ content: [{ type: "text", text: "partial grows\nline two\nline three" }], isError: false }, true);
+    check("streaming sibling shifts cached child rows");
+    assert.ok(candidate.group.childRows.find((row) => row.child === candidate.settled)!.start > previousStart);
+    for (const f of both) f.c.updateResult({ content: [{ type: "text", text: "settled became partial\nnew line" }], isError: false }, true);
+    check("settled to partial");
+    for (const f of both) f.c.updateResult({ content: [{ type: "text", text: "partial became settled\nfinal line" }], isError: true });
+    check("partial to settled/error");
+    for (const f of both) f.c.updateArgs({ command: "arguments changed 界" });
+    check("native argument revision");
+    for (const f of both) f.settled.setMetadata({ stopped: true, timing: { timestamp: start, durationMs: 321 } });
+    check("stopped/result metadata changes");
+    for (const f of both) f.group.setMetadata({ durationMs: 9000, outcome: "interrupted", keptOpen: true });
+    check("fresh parent status/duration/counts");
+    for (const f of both) f.group.setLayerExpanded(false);
+    check("fold parent");
+    for (const f of both) f.group.setLayerExpanded(true);
+    check("unfold parent with child state preserved");
+    for (const f of both) f.note.thoughtLines[0].setExpanded(true);
+    check("independent thought expansion");
+    for (const f of both) f.group.setExpanded(false);
+    check("Ctrl+O collapse");
+    for (const f of both) f.group.setExpanded(true);
+    check("Ctrl+O expand");
+    for (const f of both) f.assistant.updateContent(message("", "late thought"), true);
+    check("note to thought-only live");
+    for (const f of both) f.assistant.updateContent(message("text arrived after thought-only", "late thought"), false);
+    check("thought-only to settled note cascade");
+    for (const f of both) f.auxiliary.setText("auxiliary changed without invalidation to the group");
+    check("auxiliary bypass");
+    now += 1000;
+    const theme = currentTheme();
+    const replacement: RunTheme = { fg: (color, text) => "\x1b[38;2;50;60;70m" + theme.fg(color, text), bg: theme.bg.bind(theme), bold: theme.bold.bind(theme) };
+    for (const f of both) f.setTheme(replacement);
+    check("theme replacement invalidates native child before render");
+    for (const f of both) f.group.invalidate();
+    check("global invalidate");
+    await Promise.resolve();
+    for (const f of both) f.c.invalidate();
+    check("native asynchronous invalidation seam");
+    for (const f of both) {
+      f.group.removeChild(f.c);
+      assert.equal((f.c as unknown as { contentBox: { paddingY: number } }).contentBox.paddingY, 1, "detach restores native padding");
+    }
+    check("removed child does not contribute stale output/rows");
+    for (const f of both) f.group.clear();
+    assert.deepEqual(check("clear removes all frame ownership"), { lines: [], visibleWidths: [], counts: { tools: 0, notes: 0, errors: 0, completedTools: 0 }, rows: [] });
+  });
+}
+
+test("framed cache uses post-render revisions, normalized inner/outer widths and weak detach ownership", () => {
+  const group = new RunGroup({ index: 1 }, currentTheme, true);
+  const c = tool("bash", {}, "ANSI \x1b[32m界\x1b[0m body");
+  const child = group.addTool(c); child.setExpanded(true);
+  let renders = 0;
+  const original = child.render.bind(child);
+  child.render = (width) => { renders++; const lines = original(width); c.invalidate(); return lines; };
+  group.render(80.9);
+  const cache = (group as unknown as { cache: WeakMap<object, { width: number; frameWidth: number; revision: number; framedLines: string[] }> }).cache;
+  const first = cache.get(child)!;
+  assert.equal(first.revision, child.revision);
+  assert.equal(first.width, 76); assert.equal(first.frameWidth, 80);
+  group.render(80);
+  assert.equal(renders, 1); assert.equal(cache.get(child)!.framedLines, first.framedLines);
+  group.render(1); const narrow = { ...cache.get(child)! };
+  group.render(4); const other = { ...cache.get(child)! };
+  assert.equal(narrow.width, 1); assert.equal(other.width, 1);
+  assert.equal(narrow.frameWidth, 1); assert.equal(other.frameWidth, 4);
+  assert.notEqual(narrow.framedLines, other.framedLines);
+  group.removeChild(c);
+  assert.equal(cache.has(child), false, "removed native child releases cached frame even if caller retains its view");
+});
+
+test("native renderer asynchronous invalidation replaces settled framed bytes", async () => {
+  const body = new Text("native before asynchronous invalidate", 0, 0);
+  const c = tool("read", { path: "synthetic" }, "result", false, undefined, {
+    renderCall: () => new Text("native read call", 0, 0), renderResult: () => body,
+  });
+  const group = new RunGroup({ index: 1 }, currentTheme, true);
+  group.addTool(c).setExpanded(true);
+  assert.ok(plain(group.render(80)).join("\n").includes("native before asynchronous invalidate"));
+  await Promise.resolve().then(() => { body.setText("native after asynchronous invalidate"); c.invalidate(); });
+  const updated = plain(group.render(80)).join("\n");
+  assert.ok(updated.includes("native after asynchronous invalidate"));
+  assert.ok(!updated.includes("native before asynchronous invalidate"));
+});
+
+test("failed framing never publishes a partial frame cache and later render recovers", () => {
+  const base = currentTheme();
+  let childReached = false, failOnce = true;
+  const recording: RunTheme = { fg: (color, text) => {
+    if (childReached && failOnce && color === "borderMuted" && text === "│") { failOnce = false; throw new Error("synthetic frame failure"); }
+    return base.fg(color, text);
+  }, bg: base.bg.bind(base), bold: base.bold.bind(base) };
+  const group = new RunGroup({ index: 1 }, () => recording, true);
+  const c = tool("bash", {}, "\x1b[32mstable ANSI body\x1b[0m");
+  const child = group.addTool(c); child.setExpanded(true);
+  const original = child.render.bind(child);
+  child.render = (width) => { const lines = original(width); childReached = true; return lines; };
+  assert.throws(() => group.render(80), /synthetic frame failure/);
+  const cache = (group as unknown as { cache: WeakMap<object, { framedLines?: string[] }> }).cache;
+  assert.equal(cache.get(child)?.framedLines, undefined);
+  const expected = new BaselineRunGroup({ index: 1 }, () => base, true);
+  expected.addTool(tool("bash", {}, "\x1b[32mstable ANSI body\x1b[0m")).setExpanded(true);
+  assert.deepEqual(group.render(80), expected.render(80));
+  const frame = cache.get(child)!.framedLines;
+  const output = group.render(80); output.fill("caller mutation must not modify cached frames");
+  assert.equal(cache.get(child)!.framedLines, frame);
+  assert.deepEqual(group.render(80), expected.render(80));
 });
 
 test("grouped live timing freezes before a delayed first draw", (t) => {

@@ -11,7 +11,10 @@ export interface RunMetadata extends RecordedTiming {
   keptOpen?: boolean;
 }
 export interface ChildRows { child: RunChild; start: number; height: number; width: number }
-interface CachedChild { width: number; revision: number; theme: RunTheme; lines: string[] }
+interface CachedChild {
+  width: number; revision: number; theme: RunTheme; lines: string[];
+  frameWidth?: number; framedLines?: string[];
+}
 
 /** Bounded frame, native mouse routing and independent two-layer state. */
 export class RunGroup extends Container {
@@ -99,6 +102,7 @@ export class RunGroup extends Container {
     const index = this.entries.findIndex((entry) => entry.component === component);
     if (index >= 0) {
       const child = this.entries.splice(index, 1)[0];
+      this.cache.delete(child);
       if ("detach" in child) (child as RunChild & { detach(): void }).detach();
     }
     super.removeChild(component);
@@ -120,17 +124,21 @@ export class RunGroup extends Container {
     };
   }
   get childRows(): readonly ChildRows[] { return this.layout; }
-  private linesFor(child: RunChild, width: number, theme: RunTheme): string[] {
+  private linesFor(child: RunChild, width: number, theme: RunTheme, frameWidth: number, frame: (line: string) => string): string[] {
     const kind = child.kind + (child instanceof CommentaryRunChild && child.thoughtLines.length ? ":thought" : "");
     if (this.cascade !== undefined && this.cascadeKinds.get(child) !== kind) this.applyCascade(child);
-    const cached = this.cache.get(child);
-    if (child.settled && cached?.width === width && cached.revision === child.revision && cached.theme === theme) {
-      return cached.lines;
+    let cached = this.cache.get(child);
+    if (!(child.settled && cached?.width === width && cached.revision === child.revision && cached.theme === theme)) {
+      if (cached && cached.theme !== theme) child.invalidate();
+      const lines = child.render(width);
+      // Native renderers can invalidate while rendering: record the revision afterward.
+      cached = { width, revision: child.revision, theme, lines };
+      if (child.settled) this.cache.set(child, cached);
     }
-    if (cached && cached.theme !== theme) child.invalidate();
-    const lines = child.render(width);
-    if (child.settled) this.cache.set(child, { width, revision: child.revision, theme, lines });
-    return lines;
+    if (child.settled && cached.frameWidth === frameWidth && cached.framedLines) return cached.framedLines;
+    const framedLines = cached.lines.map(frame);
+    if (child.settled) { cached.frameWidth = frameWidth; cached.framedLines = framedLines; }
+    return framedLines; // live/partial and auxiliary output is never cached
   }
   override handleMouse(event: TuiMouseEvent): ReturnType<Container["handleMouse"]> {
     const handled = () => ({ handled: true as const, render: true, target: { component: this, originX: event.screenX - event.x, originY: event.screenY - event.y, width: event.width, height: event.height } });
@@ -193,12 +201,12 @@ export class RunGroup extends Container {
       lines.push(border("├", "┤"));
       let previousKind: RunChild["kind"] | undefined;
       for (const child of this.entries) {
-        const childLines = this.linesFor(child, innerWidth, t);
+        const childLines = this.linesFor(child, innerWidth, t, w, frame);
         if (!childLines.length) continue;
         if (previousKind && previousKind !== "row" && child.kind !== "row") lines.push(frame(""));
         this.layout.push({ child, start: lines.length, height: childLines.length, width: innerWidth });
-        // Child renderers own wrapping/background. Never give them document width.
-        lines.push(...childLines.map(frame));
+        // Child renderers own wrapping/background; linesFor reuses only settled frames.
+        lines.push(...childLines);
         previousKind = child.kind;
       }
       this.parentMouseRows.add(lines.length);
