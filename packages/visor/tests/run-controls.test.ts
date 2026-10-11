@@ -6,7 +6,7 @@ import { RunGroup } from "../src/run-group.js";
 import { RunGrouping, TranscriptGrouping, groupingForMode } from "../src/run-integration.js";
 import { CommentaryRunChild } from "../src/run-child.js";
 import { ThinkingManager } from "../src/thinking.js";
-import { ClickToExpand } from "../src/click-to-expand.js";
+import { ClickToExpand } from "./fixtures/baseline-click-to-expand.js";
 import { patchToolExecutionComponent } from "../src/tool-display.js";
 import { installMousePatch } from "../../viewport-mouse/src/patch.js";
 import { getRegistry } from "../../viewport-mouse/src/registry.js";
@@ -40,7 +40,7 @@ function fixture() {
 
 for (const combined of [false, true]) {
   test(`native chrome/child/thought routing toggles once (${combined ? "visor+viewport-mouse" : "visor only"})`, () => {
-    getRegistry().handlers.clear();
+    getRegistry().off("pi-visor.click-to-expand"); // only this test-owned frozen baseline subscriber
     const clicks = new ClickToExpand();
     clicks.install({ on() {} } as never);
     const { group, note, c, view } = fixture();
@@ -100,7 +100,7 @@ for (const combined of [false, true]) {
     click(group.childRows.find((row) => row.child === view)!.start, 0);
     assert.equal(group.expanded, true, "child-region side columns are not parent chrome");
     assert.ok(nativeCalls > 0);
-    clicks.dispose(); getRegistry().handlers.clear();
+    clicks.dispose();
   });
 }
 
@@ -159,7 +159,7 @@ for (const combined of [false, true]) {
     group.handleMouse(event(group, row.start));
     assert.equal(thought.thoughtLines[0].expanded, true); assert.equal(group.counts.notes, 0);
     assert.equal(thought.expanded, false);
-    clicks.dispose(); getRegistry().handlers.clear();
+    clicks.dispose();
   });
 }
 

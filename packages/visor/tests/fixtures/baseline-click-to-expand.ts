@@ -1,5 +1,6 @@
+// Frozen pre-S3 private Visor consumer, test-only proof of the original dual ownership.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { debugLog } from "./pi-modules.js";
+import { debugLog } from "../../src/pi-modules.js";
 
 // ── Click to expand ──────────────────────────────────────────────────────────
 // Consumes click events published by the viewport-mouse extension and toggles the

@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createRequire } from "node:module";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { formatDurShort, formatTokensShort, notifyOnce, stripAnsi, themeFg, wrapPlain } from "./format.js";
 import { debugLog, loadAssistantMessageModule } from "./pi-modules.js";
 
@@ -40,10 +40,11 @@ export function installThinkingExpansion(proto: Record<string, unknown>): void {
 // ── Thinking block ───────────────────────────────────────────────────────────
 /** The managed thought line: a component that is also an expandable block. */
 export interface ThoughtLine {
-  /** Marks this as the click target for thought expansion — see ClickToExpand. */
+  /** Marks the managed thought's own rendered bounds, never the enclosing reply. */
   __visorThoughtLine: true;
   readonly expanded: boolean;
   setExpanded(expanded: boolean): void;
+  handleMouse(event: TuiMouseEvent): { handled: true; render: true } | undefined;
   render(width: number): string[];
   invalidate(): void;
 }
@@ -315,6 +316,12 @@ export class ThinkingManager {
         try {
           (owner as { invalidate?: () => void }).invalidate?.();
         } catch {}
+      },
+      handleMouse(event) {
+        if (event.type !== "click" || event.button !== "left"
+          || !(event.x >= 0 && event.x < event.width && event.y >= 0 && event.y < event.height)) return undefined;
+        this.setExpanded(!this.expanded); // same owner flag/invalidate path as Ctrl+O and grouped thinking
+        return { handled: true, render: true };
       },
       render: (width: number) => {
         const pad = " ".repeat(Math.max(0, padVal));

@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ClickToExpand } from "./src/click-to-expand.js";
 import { ThinkingManager } from "./src/thinking.js";
 import { ToolDisplay } from "./src/tool-display.js";
 import { RunGrouping } from "./src/run-integration.js";
@@ -48,7 +47,6 @@ export default function visorExtension(pi: ExtensionAPI): void {
 
   const turnBar = new TurnBar(thinking);
   const toolDisplay = new ToolDisplay();
-  const clickToExpand = new ClickToExpand();
   const runGrouping = new RunGrouping();
 
   try {
@@ -68,13 +66,6 @@ export default function visorExtension(pi: ExtensionAPI): void {
   // Slice 2 installs membership/rebuild seams. Native clicks, Ctrl+O cascading
   // and settle policy are the following slice; the controller exposes that seam.
   runGrouping.install(pi);
-  try {
-    clickToExpand.install(pi);
-  } catch (e) {
-    try {
-      console.error("pi-visor: clickToExpand install failed", e);
-    } catch {}
-  }
 
   pi.on("session_shutdown", (event) => {
     const e = event as { reason?: string };

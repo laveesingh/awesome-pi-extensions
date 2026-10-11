@@ -53,9 +53,17 @@ In **fullscreen mode**, click:
 global choice. Commentary expansion is separate from thinking expansion. For a thinking-only
 member, Ctrl+O keeps Pi's existing reasoning-expansion meaning.
 
-Pi 0.99 routes these clicks natively: `pi-viewport-mouse` is **not required**. Both packages can
-still be loaded together; visor defers grouped clicks from the legacy event route so native
-routing performs one toggle. Regular mode has no transcript mouse route; Ctrl+O still works.
+On the tested Pi 0.99.1 fullscreen host, these clicks have native owners, including standalone
+managed thinking. `pi-viewport-mouse` is **not required** for visor's targets. Visor no longer
+registers a legacy click subscriber, so native tools cannot be toggled twice by visor itself.
+The packages still coexist: viewport-mouse's registry/API and other subscribers remain intact.
+Other subscribers can still incur the legacy geometry walk; their behavior is outside visor's
+ownership. Regular mode has no transcript mouse route; Ctrl+O still works.
+
+Settled child frames reuse the existing weak width/revision/theme cache. Parent counts, status,
+timing and row geometry remain fresh; live/partial children and auxiliary rows bypass framing
+reuse. Native ANSI formatting and narrow-width clipping are unchanged. Fixture CPU observations
+are recorded in the profiling evidence, not promised as live input or frame-rate gains.
 
 ### Live runs and settlement
 
