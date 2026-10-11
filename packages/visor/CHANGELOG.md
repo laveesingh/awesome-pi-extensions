@@ -3,6 +3,24 @@
 All notable changes to `pi-visor` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-10-11
+
+Requires Pi 0.99.1 and Node 22.19.0 or newer.
+
+### Performance
+
+- Reuse the fully framed output of settled run-group children instead of re-framing every
+  child on every frame. Changes to the child's state, revision, theme, width or expansion still
+  invalidate it. On a 1,000-line expanded fixture at width 120, render time per frame drops from
+  about 70 ms to under 0.1 ms, with byte-identical output.
+
+### Clicks
+
+- Standalone managed thoughts now handle primary clicks through Pi's native mouse routing.
+- Remove Visor's legacy viewport-mouse click subscriber. Native routing is now the only click
+  owner, so a standalone tool block toggles once per click instead of twice. viewport-mouse
+  and its other subscribers are unaffected.
+
 ## [0.2.0] — 2026-10-02
 
 Requires Pi 0.99.1 and Node 22.19.0 or newer.
