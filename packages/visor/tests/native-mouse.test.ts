@@ -11,9 +11,9 @@ import { ClickToExpand } from "./fixtures/baseline-click-to-expand.js";
 import visorExtension from "../index.js";
 import viewportMouseExtension from "../../viewport-mouse/index.js";
 // @ts-expect-error Plain-JS profiling fixtures deliberately have no declaration package.
-import { mockTerminal } from "../../../scripts/profiling/fixture.js";
+import { mockTerminal } from "./fixtures/profiling-fixture.js";
 // @ts-expect-error Read-only geometry helper observes real render caches, never rerenders.
-import { cachedChildren, firstMouseRegion, visiblePoint } from "../../../scripts/profiling/geometry.js";
+import { cachedChildren, firstMouseRegion, visiblePoint } from "./fixtures/native-geometry.js";
 
 const tm = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
 Pi.initTheme("dark");
