@@ -57,14 +57,34 @@ export function wrapPlain(text: string, width: number): string[] {
   return out;
 }
 
-export function themeFg(ctx: ExtensionContext | null, color: string, s: string): string {
+type ThemeLike = { fg: (color: string, s: string) => string };
+
+// Memoized rescue path for a missing context theme. Pi's theme object is a
+// Proxy around a Theme instance, so this stays live across theme switches.
+let fallbackTheme: ThemeLike | null | undefined;
+function fallbackThemeModule(): ThemeLike | null {
+  if (fallbackTheme !== undefined) return fallbackTheme;
+  fallbackTheme = null;
   try {
-    const fg = (ctx?.ui as unknown as { theme?: { fg?: (c: string, s: string) => string } } | undefined)?.theme?.fg;
-    if (typeof fg === "function") return fg(color, s);
+    const mod = loadThemeModule() as { theme?: ThemeLike } | null;
+    if (mod?.theme && typeof mod.theme.fg === "function") fallbackTheme = mod.theme;
+  } catch {}
+  return fallbackTheme;
+}
+
+export function themeFg(ctx: ExtensionContext | null, color: string, s: string): string {
+  // Pi's fg() reads instance state (this.tokenAnsi, this.fgAnsi, …), so it must
+  // be invoked as a method. Extracting it and calling it unbound throws on
+  // every call — and the old code swallowed that into loadThemeModule(), which
+  // scans require.cache and spawns `which pi` (~60 ms) per themed string on
+  // render hot paths, yet still returned unstyled text.
+  try {
+    const theme = (ctx?.ui as unknown as { theme?: ThemeLike } | undefined)?.theme;
+    if (theme && typeof theme.fg === "function") return theme.fg(color, s);
   } catch {}
   try {
-    const mod = loadThemeModule() as { theme?: { fg?: (c: string, s: string) => string } } | null;
-    if (mod?.theme?.fg) return mod.theme.fg(color, s);
+    const fallback = fallbackThemeModule();
+    if (fallback) return fallback.fg(color, s);
   } catch {}
   return s;
 }
