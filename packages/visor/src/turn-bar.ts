@@ -82,15 +82,34 @@ export class TurnBar {
     return `${dot} ${label}${stats}  ${barStr}${pctStr}`;
   }
 
+  private lastLine: string | null = null;
+  private lastDeltaTick = 0;
+  private static readonly DELTA_TICK_MS = 500;
+
   private tick = (): void => {
     if (!this.active || this.turnStartAt == null || !this.ctx) return;
     const line = this.buildWorkingLine(true);
+    // Coalesce: a widget update rebuilds Pi's widget container and requests a
+    // full transcript render. The line only changes ~1-2x/s (seconds counter,
+    // blink, token estimates), so skip identical frames instead of redrawing
+    // the whole transcript on every streaming delta.
+    if (line === this.lastLine) return;
+    this.lastLine = line;
     try {
       (this.ctx.ui as unknown as { setWidget?: (id: string, c: unknown) => void }).setWidget?.("turn-bar", () => ({
         render: () => [line],
         invalidate() {},
       }));
     } catch {}
+  };
+
+  // Delta-path ticks are throttled: streaming can deliver dozens of deltas per
+  // second, and the 500 ms interval already keeps the bar fresh between them.
+  private requestTick = (): void => {
+    const now = Date.now();
+    if (now - this.lastDeltaTick < TurnBar.DELTA_TICK_MS) return;
+    this.lastDeltaTick = now;
+    this.tick();
   };
 
   private beginAgentRun = (_e: unknown, ctx: ExtensionContext): void => {
@@ -104,6 +123,8 @@ export class TurnBar {
     this.liveOutChars = 0;
     this.liveOutTokensEst = 0;
     this.inputSeeded = false;
+    this.lastLine = null;
+    this.lastDeltaTick = 0;
 
     this.thinking.resetForNewRun(ctx);
 
@@ -158,7 +179,7 @@ export class TurnBar {
     ) {
       this.liveOutChars += delta.length;
       this.liveOutTokensEst = Math.round(this.liveOutChars / 4);
-      this.tick();
+      this.requestTick();
     }
   };
 
@@ -217,6 +238,7 @@ export class TurnBar {
 
   private onShutdown = (): void => {
     this.active = false;
+    this.lastLine = null;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;

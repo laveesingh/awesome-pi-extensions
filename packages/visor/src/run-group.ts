@@ -16,6 +16,19 @@ interface CachedChild {
   frameWidth?: number; framedLines?: string[];
 }
 
+/**
+ * V8 keeps a string built by concatenation as a tree of its parts until
+ * something reads it whole, and a cached line kept as such a tree retains
+ * several times its own size (Pi 1.3.0 flattens cached Box/Markdown/Text lines
+ * for the same reason). Converting to a number reads the string whole, so V8
+ * flattens it in place. Local helper rather than a pi-tui import so the cache
+ * works on Pi versions predating the export. Only call on store paths — it is
+ * O(total length) and must not run per frame for live children.
+ */
+function flatten(lines: string[]): void {
+  for (const line of lines) Number(line);
+}
+
 /** Bounded frame, native mouse routing and independent two-layer state. */
 export class RunGroup extends Container {
   readonly __visorRunGroup = true;
@@ -133,11 +146,18 @@ export class RunGroup extends Container {
       const lines = child.render(width);
       // Native renderers can invalidate while rendering: record the revision afterward.
       cached = { width, revision: child.revision, theme, lines };
-      if (child.settled) this.cache.set(child, cached);
+      if (child.settled) {
+        flatten(lines);
+        this.cache.set(child, cached);
+      }
     }
     if (child.settled && cached.frameWidth === frameWidth && cached.framedLines) return cached.framedLines;
     const framedLines = cached.lines.map(frame);
-    if (child.settled) { cached.frameWidth = frameWidth; cached.framedLines = framedLines; }
+    if (child.settled) {
+      flatten(framedLines);
+      cached.frameWidth = frameWidth;
+      cached.framedLines = framedLines;
+    }
     return framedLines; // live/partial and auxiliary output is never cached
   }
   override handleMouse(event: TuiMouseEvent): ReturnType<Container["handleMouse"]> {
