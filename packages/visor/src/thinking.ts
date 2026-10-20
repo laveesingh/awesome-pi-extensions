@@ -51,6 +51,33 @@ export interface ThoughtLine {
 
 export type ThinkSnapshot = { durMs: number; tokens: number };
 
+/**
+ * The native hidden-thinking label's indent, or null when the child is not a
+ * thinking placeholder. Pi wraps the label in a MouseRegion (its native click
+ * toggle), so the label never carries `.text` itself — it lives on the wrapped
+ * Text child. Plain-Text matches keep the historical label check;
+ * region-wrapped Text matches by shape, because the label is customizable
+ * (hiddenThinkingLabel) and this scan only runs for messages that actually
+ * contain thinking, where the region can only be the native thinking block.
+ */
+export function placeholderPad(kid: unknown): number | null {
+  const k = kid as { text?: unknown; paddingX?: unknown; child?: unknown } | null;
+  if (!k || typeof k !== "object") return null;
+  if (typeof k.text === "string") {
+    const stripped = stripAnsi(k.text).trim();
+    if (stripped === "Thinking..." || stripped === "Thinking…" || stripped.startsWith("Thinking")) {
+      return typeof k.paddingX === "number" ? k.paddingX : 1;
+    }
+    return null;
+  }
+  const inner = k.child as { text?: unknown; paddingX?: unknown } | null;
+  if (inner && typeof inner.text === "string") {
+    const pad = k.paddingX ?? inner.paddingX;
+    return typeof pad === "number" ? pad : 1;
+  }
+  return null;
+}
+
 export class ThinkingManager {
   active = false;
   startAt = 0;
@@ -481,19 +508,15 @@ export class ThinkingManager {
           const container = this.contentContainer as { children?: unknown[] } | undefined;
           const kids = container?.children;
           if (!Array.isArray(kids)) return;
-          let placeholderIndex = -1;
           const placeholderIdxs: number[] = [];
-          let placeholder: { text?: unknown; paddingX?: unknown } | null = null;
+          let placeholderPadVal: number | null = null;
           for (let i = 0; i < kids.length; i++) {
-            const k = kids[i] as { text?: unknown } | null;
-            if (!k || typeof k.text !== "string") continue;
-            const stripped = stripAnsi(k.text).trim();
-            if (stripped === "Thinking..." || stripped === "Thinking…" || stripped.startsWith("Thinking")) {
-              placeholderIdxs.push(i);
-              if (!placeholder) placeholder = k as { text?: unknown; paddingX?: unknown };
-            }
+            const pad = placeholderPad(kids[i]);
+            if (pad === null) continue;
+            placeholderIdxs.push(i);
+            if (placeholderPadVal === null) placeholderPadVal = pad;
           }
-          placeholderIndex = placeholderIdxs.length > 0 ? placeholderIdxs[0] : -1;
+          const placeholderIndex = placeholderIdxs.length > 0 ? placeholderIdxs[0] : -1;
           const isLive = self.isLiveForMessage(message);
           let snap = self.resolveSnap(message);
           const snapForRender = isLive ? null : snap;
@@ -513,7 +536,7 @@ export class ThinkingManager {
             if (totalChars === 0) snap = { durMs: 0, tokens: 0 }; else return;
           }
           const finalSnap = isLive ? null : (snap ?? { durMs: 0, tokens: 0 });
-          const padVal = typeof placeholder?.paddingX === "number" ? placeholder.paddingX : 1;
+          const padVal = placeholderPadVal ?? 1;
           const lineComp = self.makeThoughtLine(owner, finalSnap as ThinkSnapshot | null, padVal as number);
           for (const idx of placeholderIdxs) kids[idx] = lineComp as unknown;
         } catch (e) {
@@ -607,18 +630,16 @@ export class ThinkingManager {
         if (!Array.isArray(kids)) return;
 
         // Find ALL placeholders to replace (one per thinking run in the message).
+        // The native label is a MouseRegion around a Text, so match via
+        // placeholderPad (shape-aware) rather than raw `.text`.
         const placeholderIdxs: number[] = [];
-        let placeholder: { text?: unknown; paddingX?: unknown } | null = null;
+        let placeholderPadVal: number | null = null;
 
         for (let i = 0; i < kids.length; i++) {
-          const k = kids[i] as { text?: unknown; paddingX?: unknown; constructor?: { name?: string } } | null;
-          if (!k || typeof k.text !== "string") continue;
-          // Match both "Thinking..." and any text that looks like a thinking placeholder
-          const stripped = stripAnsi(k.text).trim();
-          if (stripped === "Thinking..." || stripped === "Thinking…" || stripped.startsWith("Thinking")) {
-            placeholderIdxs.push(i);
-            if (!placeholder) placeholder = k as { text?: unknown; paddingX?: unknown };
-          }
+          const pad = placeholderPad(kids[i]);
+          if (pad === null) continue;
+          placeholderIdxs.push(i);
+          if (placeholderPadVal === null) placeholderPadVal = pad;
         }
         const placeholderIndex = placeholderIdxs.length > 0 ? placeholderIdxs[0] : -1;
 
@@ -668,7 +689,7 @@ export class ThinkingManager {
         }
 
         const finalSnap = isLive ? null : (snap ?? { durMs: 0, tokens: 0 });
-        const padVal = typeof placeholder?.paddingX === "number" ? placeholder.paddingX : 1;
+        const padVal = placeholderPadVal ?? 1;
         const lineComp = self.makeThoughtLine(owner, finalSnap as ThinkSnapshot | null, padVal as number);
         for (const idx of placeholderIdxs) kids[idx] = lineComp as unknown;
       } catch (e) {

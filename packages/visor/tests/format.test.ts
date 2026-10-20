@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compactResult, extractToolText, formatDurShort, formatTokensShort, wrapPlain } from "../src/format.js";
+import { compactResult, extractToolText, formatDurShort, formatTokensShort, themeFg, wrapPlain } from "../src/format.js";
 
 const asResult = (text: string, details?: unknown) => ({
 	content: [{ type: "text", text }],
@@ -117,6 +117,28 @@ test("wrapPlain breaks on spaces and preserves paragraphs", () => {
 
 test("wrapPlain hard-breaks a word longer than the width", () => {
 	assert.ok(wrapPlain("x".repeat(25), 10).every((l) => l.length <= 10));
+});
+
+test("themeFg invokes fg as a method — Pi's fg reads instance state", () => {
+	// Pi's theme is a Proxy around a Theme instance whose fg() reads
+	// this.tokenAnsi. Extracting fg and calling it unbound throws on every call,
+	// which used to fall into a ~60 ms loadThemeModule() fallback per themed
+	// string (and still returned unstyled text). A `this`-dependent fake pins
+	// the method-call contract without importing Pi.
+	const theme = {
+		prefix: "\x1b[90m",
+		fg(this: { prefix: string }, color: string, s: string) {
+			assert.equal(color, "muted");
+			return `${this.prefix}${s}\x1b[39m`;
+		},
+	};
+	const styled = themeFg({ ui: { theme } } as never, "muted", "hi");
+	assert.equal(styled, "\x1b[90mhi\x1b[39m");
+});
+
+test("themeFg without a theme returns plain text instead of throwing", () => {
+	assert.equal(themeFg(null, "muted", "hi"), "hi");
+	assert.equal(themeFg({} as never, "muted", "hi"), "hi");
 });
 
 test("short formatters", () => {

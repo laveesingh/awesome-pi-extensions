@@ -125,6 +125,24 @@ test("the click target is the thought line, never the whole message", { skip }, 
 	assert.ok(line.expanded);
 });
 
+test("the native placeholder is replaced, never duplicated", { skip }, () => {
+	// Pi wraps the hidden label in a MouseRegion (no `.text` of its own), so a
+	// text-only scan missed it and every message rendered both the managed
+	// line and the native label.
+	const out = lines(build(withThinking));
+	assert.ok(!out.some((l) => l === "Thinking..."), `native label leaked:\n${out.join("\n")}`);
+	assert.equal(out.filter((l) => l.includes("Thought")).length, 1);
+});
+
+test("a custom hidden label is replaced too", { skip }, () => {
+	// Shape match, not label-text match: hiddenThinkingLabel is customizable.
+	const C = (Pi as unknown as { AssistantMessageComponent: new (...a: unknown[]) => unknown }).AssistantMessageComponent;
+	const c = new C(withThinking, false, undefined, "Reflecting…") as Amc;
+	const out = lines(c);
+	assert.ok(!out.some((l) => l.includes("Reflecting")), `custom label leaked:\n${out.join("\n")}`);
+	assert.equal(out.filter((l) => l.includes("Thought")).length, 1);
+});
+
 test("an expanded thought line owns the rows its reasoning occupies", { skip }, () => {
 	const c = build(withThinking);
 	c.setExpanded(true);
