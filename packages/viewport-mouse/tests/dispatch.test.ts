@@ -311,3 +311,46 @@ test("with no subscribers the click is delegated untouched", () => {
 	const result = screen.handleViewportInput(sgr(0, 2, screenRow(1), false));
 	assert.equal(result, "original");
 });
+
+test("a focused fullscreen overlay defers the click without dispatching", () => {
+	// Pi routes overlay clicks to the overlay; resolving them against the
+	// hidden transcript would toggle whatever sits behind the dialog.
+	const { screen } = buildScreen();
+	(screen as any).shouldDeferViewportInputToOverlay = () => true;
+	let calls = 0;
+	getRegistry().on("test", () => {
+		calls++;
+		return true;
+	});
+	const result = screen.handleViewportInput(sgr(0, 2, screenRow(1), false));
+	assert.equal(calls, 0, "transcript subscribers must not see overlay clicks");
+	assert.equal(result, "original", "the overlay still receives the click");
+	assert.equal(screen.delegated.length, 1);
+});
+
+test("an overlay seam reporting false dispatches normally", () => {
+	const { screen } = buildScreen();
+	(screen as any).shouldDeferViewportInputToOverlay = () => false;
+	let calls = 0;
+	getRegistry().on("test", () => {
+		calls++;
+		return true;
+	});
+	screen.handleViewportInput(sgr(0, 2, screenRow(1), false));
+	assert.equal(calls, 1);
+});
+
+test("a throwing overlay seam fails open to the old behavior", () => {
+	const { screen } = buildScreen();
+	(screen as any).shouldDeferViewportInputToOverlay = () => {
+		throw new Error("foreign TUI shape");
+	};
+	let calls = 0;
+	getRegistry().on("test", () => {
+		calls++;
+		return true;
+	});
+	const result = screen.handleViewportInput(sgr(0, 2, screenRow(1), false));
+	assert.equal(calls, 1, "an unknown seam must not swallow clicks");
+	assert.equal(result, "original");
+});

@@ -117,6 +117,7 @@ Only a **left-button release** with no drag. Deliberately ignored, and passed th
 - text-selection drags, and releases whose press landed on a different row
 - clicks that activate an OSC 8 link
 - clicks outside the transcript viewport (editor, status bar, footer)
+- clicks while a fullscreen overlay (search, selector, dialog) has focus — Pi routes those to the overlay, so publishing them against the hidden transcript would toggle the wrong components
 
 This mirrors Pi's own rule for distinguishing a click from a drag. The original handler is always
 called afterwards, so scrolling, selection and links keep working exactly as before.

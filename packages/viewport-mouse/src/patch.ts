@@ -61,6 +61,23 @@ export function installMousePatch(options: PatchOptions = {}): boolean {
 		if (!isLeftRelease || registry.handlers.size === 0) return original.call(this, data);
 
 		try {
+			// Mirror Pi's overlay rule (shouldDeferViewportInputToOverlay): when a
+			// fullscreen overlay — search, selector, login dialog — has focus, the
+			// click belongs to it. Resolving against the hidden transcript would
+			// toggle whatever happens to sit behind the dialog. Feature-detected
+			// so Pi versions without the seam keep the old behavior, and a
+			// throwing seam fails open to the old behavior as well.
+			const deferToOverlay = this.shouldDeferViewportInputToOverlay;
+			if (typeof deferToOverlay === "function") {
+				let deferred = false;
+				try {
+					deferred = !!deferToOverlay.call(this);
+				} catch {
+					deferred = false;
+				}
+				if (deferred) return original.call(this, data);
+			}
+
 			// Pi's own rule for distinguishing a click from a drag, borrowed from its
 			// OSC 8 link activation: a drag is a text selection, and a pressed link
 			// takes precedence over anything a subscriber might want to do.
