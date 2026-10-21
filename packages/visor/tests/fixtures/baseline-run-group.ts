@@ -1,15 +1,17 @@
 // Frozen 113679a RunGroup for deterministic ANSI/geometry parity; imports point to unchanged native adapters.
+// Its header/footer render through the shared status block (0.2.3), so parity still isolates the child cache.
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Container, type Component, type TuiMouseEvent, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { AuxiliaryRunChild, CommentaryRunChild, ToolRunChild, type RunChild } from "../../src/run-child.js";
-import { fitLine, timingParts, type RecordedTiming, type RunTheme, type ThemeSource } from "../../src/run-style.js";
+import { statusBlock, type RunTokens } from "../../src/run-status.js";
+import { fitLine, type RecordedTiming, type RunTheme, type ThemeSource } from "../../src/run-style.js";
 import type { GroupToolPresentation } from "../../src/tool-display.js";
 
 export interface RunMetadata extends RecordedTiming {
   index: number;
   live?: boolean;
   outcome?: "success" | "error" | "interrupted";
-  keptOpen?: boolean;
+  tokens?: RunTokens;
 }
 export interface ChildRows { child: RunChild; start: number; height: number; width: number }
 interface CachedChild { width: number; revision: number; theme: RunTheme; lines: string[] }
@@ -42,7 +44,6 @@ export class RunGroup extends Container {
   markTouched(): void {
     if (!this.runActive) return;
     this.touched = true;
-    this.metadata.keptOpen = true;
   }
   /** Native Ctrl+O: both layers, with D12's distinct thought-only meaning. */
   setExpanded(expanded: boolean): void {
@@ -69,7 +70,6 @@ export class RunGroup extends Container {
     this.runActive = false;
     this.metadata.live = false;
     if (this.touched || this.counts.errors || this.metadata.outcome === "error" || this.metadata.outcome === "interrupted") {
-      this.metadata.keptOpen = true;
       return;
     }
     this.expanded = false;
@@ -176,18 +176,13 @@ export class RunGroup extends Container {
     const status = this.metadata.live ? "Working" : outcome === "interrupted" ? "Interrupted"
       : outcome === "error" ? "Worked · recovered" : "Worked";
     const color = this.metadata.live ? "warning" : outcome === "success" ? "success" : "error";
-    const header = t.fg("accent", this.expanded ? "▾" : "▸") + " " + t.fg(color, "●") + " "
-      + t.fg("text", t.bold(`Run ${this.metadata.index} · ${status}`));
-    const duration = timingParts({ durationMs: this.metadata.durationMs }, true)[0];
-    const timestamp = timingParts({ timestamp: this.metadata.timestamp })[0];
-    const parts = [`${counts.tools} ${counts.tools === 1 ? "tool" : "tools"}`, `${counts.notes} ${counts.notes === 1 ? "note" : "notes"}`, ...(duration ? [duration] : []),
-      `${counts.errors} ${counts.errors === 1 ? "error" : "errors"}` +
-      (outcome === "interrupted" ? ` · stopped after ${counts.completedTools} ${counts.completedTools === 1 ? "tool" : "tools"}` : ""), ...(timestamp ? [timestamp] : [])];
-    const kept = this.metadata.keptOpen || outcome !== "success" ? " · kept open" : "";
-    const meta = t.fg("muted", parts.join(" • ") + kept + " (ctrl+o)");
-    const lines = [border("┌", "┐"), ...wrapTextWithAnsi(header, innerWidth).map(frame)];
-    // Meta keeps its two-cell indent on every wrapped row.
-    lines.push(...wrapTextWithAnsi(meta, Math.max(1, innerWidth - 2)).map((line) => frame("  " + line)));
+    const running = this.metadata.live ? this.entries.filter((child) => child.kind === "tool" && !child.settled && !child.stopped).length : 0;
+    const block = (arrow: string) => statusBlock(t, {
+      index: this.metadata.index, label: status, dot: color, timestamp: this.metadata.timestamp, durationMs: this.metadata.durationMs,
+      tools: counts.tools, running, notes: counts.notes, errors: counts.errors,
+      stoppedAfter: outcome === "interrupted" ? counts.completedTools : undefined, tokens: this.metadata.tokens,
+    }, arrow, innerWidth).map(frame);
+    const lines = [border("┌", "┐"), ...block(this.expanded ? "▾" : "▸")];
     for (let row = 0; row < lines.length; row++) this.parentMouseRows.add(row);
     if (this.expanded) {
       this.parentMouseRows.add(lines.length);
@@ -203,8 +198,9 @@ export class RunGroup extends Container {
         previousKind = child.kind;
       }
       this.parentMouseRows.add(lines.length);
-      this.parentMouseRows.add(lines.length + 1);
-      lines.push(border("├", "┤"), frame(t.fg("muted", this.metadata.live ? "Run in progress" : "End of run · final response below")));
+      const footer = block("▴");
+      for (let row = 0; row < footer.length; row++) this.parentMouseRows.add(lines.length + 1 + row);
+      lines.push(border("├", "┤"), ...footer);
     }
     this.parentMouseRows.add(lines.length);
     lines.push(border("└", "┘"));
