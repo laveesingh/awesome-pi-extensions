@@ -586,3 +586,58 @@ test("the footer block is a click target that folds the box, like the header", (
   click(group, group.childRows[0].start, 80, lines.length);
   assert.equal(group.expanded, true, "a child row toggles the child, not the box");
 });
+
+// ── Status block cost: row 2 once per render; settled blocks reused (GOL-545) ──
+function recordingTheme() {
+  const calls: Array<[string, string]> = [];
+  const base = currentTheme();
+  let theme: RunTheme = { fg: (color, text) => { calls.push([color, text]); return base.fg(color, text); }, bg: base.bg.bind(base), bold: base.bold.bind(base) };
+  const built = (needle: string) => calls.filter(([, text]) => text === needle).length;
+  return { calls, theme: () => theme, replace: () => { const previous = theme; theme = { fg: (c, t) => previous.fg(c, t), bg: previous.bg, bold: previous.bold }; }, built };
+}
+function settledRun(source: () => RunTheme, expanded = false) {
+  const group = new RunGroup({ index: 4, timestamp: start, durationMs: 9000, tokens: { input: 5, cache: 6, output: 7 } }, source, expanded);
+  group.addTool(tool("bash", {}, "ok"), { timing: {} });
+  group.addTool(tool("bash", {}, "ok"), { timing: {} });
+  return group;
+}
+
+test("an expanded run builds row 2 once and shares it between header and footer", () => {
+  const rec = recordingTheme();
+  const group = settledRun(rec.theme, true);
+  const lines = group.render(100);
+  assert.equal(rec.built("2 tools"), 1, "one build of the counts for two blocks");
+  assert.equal(lines[2], lines.at(-2), "footer row 2 is the header's row 2");
+});
+
+test("a settled run reuses its block across renders and rebuilds it on width, theme, status or invalidate", () => {
+  const rec = recordingTheme();
+  const group = settledRun(rec.theme);
+  const first = group.render(100);
+  assert.equal(rec.built("2 tools"), 1);
+  assert.deepEqual(group.render(100), first, "reuse is byte-identical");
+  assert.equal(rec.built("2 tools"), 1, "second render of a settled run builds nothing");
+  group.render(90);
+  assert.equal(rec.built("2 tools"), 2, "width change rebuilds");
+  group.render(90);
+  assert.equal(rec.built("2 tools"), 2);
+  rec.replace();
+  group.render(90);
+  assert.equal(rec.built("2 tools"), 3, "a new theme object rebuilds");
+  group.setMetadata({ tokens: { input: 5, cache: 6, output: 8 } });
+  assert.match(plain(group.render(90))[2], /↓ 8/);
+  assert.equal(rec.built("2 tools"), 4, "a changed token sum rebuilds");
+  group.addTool(tool("bash", {}, "ok"), { timing: {} });
+  assert.match(plain(group.render(90))[2], /3 tools/);
+  group.invalidate();
+  group.render(90);
+  assert.equal(rec.built("3 tools"), 2, "invalidate drops the cached block");
+});
+
+test("a live run rebuilds its block every render", () => {
+  const rec = recordingTheme();
+  const group = new RunGroup({ index: 1, live: true, durationMs: 1000 }, rec.theme, false);
+  group.addTool(tool("bash", {}));
+  group.render(100); group.render(100);
+  assert.equal(rec.built("1 tool (1 running)"), 2);
+});

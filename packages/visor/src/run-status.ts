@@ -23,18 +23,21 @@ export interface RunStatus {
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/**
- * The two-row status block shared by the header, the footer and the collapsed box. Only the
- * arrow differs between them, so a long run's footer says what its scrolled-away header said.
- * Row 2 breaks between segments, never inside one, so no count is clipped or split.
- */
-export function statusBlock(t: RunTheme, status: RunStatus, arrow: string, width: number): string[] {
+/** Row 1 depends on the arrow alone; the rows after it are the same wherever the block is drawn. */
+export interface StatusParts { first(arrow: string): string[]; rest: string[] }
+
+/** The unframed block, with row 1 left open on its arrow so header and footer share the rest. */
+export function statusParts(t: RunTheme, status: RunStatus, width: number): StatusParts {
   const w = Math.max(1, width);
-  const left = t.fg("accent", arrow) + " " + t.fg(status.dot, "●") + " " + t.fg("text", t.bold(`Run ${status.index} · ${status.label}`));
+  const title = t.fg("text", t.bold(`Run ${status.index} · ${status.label}`));
+  const dot = t.fg(status.dot, "●");
   const time = timingParts({ timestamp: status.timestamp })[0];
-  const first = !time ? wrapTextWithAnsi(left, w)
-    : visibleWidth(left) + 2 + time.length <= w ? [left + " ".repeat(w - visibleWidth(left) - time.length) + t.fg("muted", time)]
-    : wrapTextWithAnsi(left + "  " + t.fg("muted", time), w);
+  const first = (arrow: string): string[] => {
+    const left = t.fg("accent", arrow) + " " + dot + " " + title;
+    return !time ? wrapTextWithAnsi(left, w)
+      : visibleWidth(left) + 2 + time.length <= w ? [left + " ".repeat(w - visibleWidth(left) - time.length) + t.fg("muted", time)]
+      : wrapTextWithAnsi(left + "  " + t.fg("muted", time), w);
+  };
 
   const duration = timingParts({ durationMs: status.durationMs }, true)[0];
   const segments = [
@@ -57,5 +60,15 @@ export function statusBlock(t: RunTheme, status: RunStatus, arrow: string, width
   }
   if (row) rows.push(row);
   // A single segment wider than the row can only wrap; the indent stays on every row.
-  return [...first, ...rows.flatMap((line) => wrapTextWithAnsi(line, room)).map((line) => "  " + line)];
+  return { first, rest: rows.flatMap((line) => wrapTextWithAnsi(line, room)).map((line) => "  " + line) };
+}
+
+/**
+ * The two-row status block shared by the header, the footer and the collapsed box. Only the
+ * arrow differs between them, so a long run's footer says what its scrolled-away header said.
+ * Row 2 breaks between segments, never inside one, so no count is clipped or split.
+ */
+export function statusBlock(t: RunTheme, status: RunStatus, arrow: string, width: number): string[] {
+  const parts = statusParts(t, status, width);
+  return [...parts.first(arrow), ...parts.rest];
 }

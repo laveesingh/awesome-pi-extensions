@@ -1,7 +1,7 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { AuxiliaryRunChild, CommentaryRunChild, ToolRunChild, type RunChild } from "./run-child.js";
-import { statusBlock, type RunTokens } from "./run-status.js";
+import { statusParts, type RunStatus, type RunTokens } from "./run-status.js";
 import { fitLine, type RecordedTiming, type RunTheme, type ThemeSource } from "./run-style.js";
 import type { GroupToolPresentation } from "./tool-display.js";
 
@@ -28,6 +28,8 @@ export class RunGroup extends Container {
   private layout: ChildRows[] = [];
   private layoutWidth = 0;
   private parentMouseRows = new Set<number>();
+  /** Framed status block per arrow. Settled runs only; the key holds everything the block reads. */
+  private blocks = new Map<string, { key: string; theme: RunTheme; lines: string[] }>();
   private cascade?: boolean;
   private cascadeKinds = new WeakMap<RunChild, string>();
   private runActive: boolean;
@@ -113,15 +115,20 @@ export class RunGroup extends Container {
   }
   override invalidate(): void {
     this.cache = new WeakMap();
+    this.blocks.clear();
     super.invalidate();
   }
   get counts(): { tools: number; notes: number; errors: number; completedTools: number } {
-    return {
-      tools: this.entries.filter((child) => child.kind === "tool").length,
-      notes: this.entries.filter((child) => child.kind === "note").length,
-      errors: this.entries.filter((child) => child.kind === "tool" && child.failed).length,
-      completedTools: this.entries.filter((child) => child.kind === "tool" && child.settled && !child.stopped).length,
-    };
+    const counts = { tools: 0, notes: 0, errors: 0, completedTools: 0 };
+    for (const child of this.entries) {
+      if (child.kind === "note") counts.notes++;
+      else if (child.kind === "tool") {
+        counts.tools++;
+        if (child.failed) counts.errors++;
+        if (child.settled && !child.stopped) counts.completedTools++;
+      }
+    }
+    return counts;
   }
   get childRows(): readonly ChildRows[] { return this.layout; }
   private linesFor(child: RunChild, width: number, theme: RunTheme, frameWidth: number, frame: (line: string) => string): string[] {
@@ -184,11 +191,25 @@ export class RunGroup extends Container {
       : outcome === "error" ? "Worked · recovered" : "Worked";
     const running = this.metadata.live ? this.entries.filter((child) => child.kind === "tool" && !child.settled && !child.stopped).length : 0;
     const color = this.metadata.live ? "warning" : outcome === "success" ? "success" : "error";
-    const block = (arrow: string) => statusBlock(t, {
+    const state: RunStatus = {
       index: this.metadata.index, label: status, dot: color, timestamp: this.metadata.timestamp, durationMs: this.metadata.durationMs,
       tools: counts.tools, running, notes: counts.notes, errors: counts.errors,
       stoppedAfter: outcome === "interrupted" ? counts.completedTools : undefined, tokens: this.metadata.tokens,
-    }, arrow, innerWidth).map(frame);
+    };
+    // A settled run's block is reused until something it reads changes; live runs always rebuild.
+    const settled = !this.metadata.live;
+    const tokens = state.tokens;
+    const key = settled ? [state.index, status, color, state.timestamp, state.durationMs, state.tools, state.running, state.notes, state.errors,
+      state.stoppedAfter, tokens?.input, tokens?.cache, tokens?.output, innerWidth].join("|") : "";
+    let parts: ReturnType<typeof statusParts> | undefined; // row 2 is built once per render and shared by header and footer
+    const block = (arrow: string): string[] => {
+      const cached = settled ? this.blocks.get(arrow) : undefined;
+      if (cached && cached.key === key && cached.theme === t) return cached.lines;
+      parts ??= statusParts(t, state, innerWidth);
+      const lines = [...parts.first(arrow), ...parts.rest].map(frame);
+      if (settled) this.blocks.set(arrow, { key, theme: t, lines });
+      return lines;
+    };
     const lines = [border("┌", "┐"), ...block(this.expanded ? "▾" : "▸")];
     for (let row = 0; row < lines.length; row++) this.parentMouseRows.add(row);
     if (this.expanded) {
