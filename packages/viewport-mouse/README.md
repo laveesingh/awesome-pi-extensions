@@ -1,5 +1,9 @@
 # pi-viewport-mouse
 
+> [!WARNING]
+> **Deprecated and no longer maintained.** Pi 0.99+ routes mouse clicks to components natively,
+> and `pi-visor` does not need this package. Remove it from your Pi packages.
+
 Mouse click routing for the [Pi coding agent](https://pi.dev) TUI.
 
 Pi 0.99 routes mouse events to components natively. This extension adds a separate event surface:

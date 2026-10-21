@@ -110,7 +110,8 @@ pi --tui-mode fullscreen   # for native clicks; Ctrl+O also works in regular mod
 ## Requirements
 
 - Node **22.19.0 or newer**.
-- Pi **0.99.1**. This package patches private Pi seams; updates can break compatibility.
+- Pi **0.99.1** or **1.3.0** (both tested). This package patches private Pi seams; other
+  versions can break compatibility.
 - Fullscreen TUI mode for transcript clicks. No extra mouse extension is required.
 
 ## Stability

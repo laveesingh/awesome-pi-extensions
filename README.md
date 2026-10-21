@@ -7,7 +7,7 @@ and **published to npm on its own** — this repository is the workspace, not th
 
 | Package | What it does |
 |---|---|
-| [`pi-viewport-mouse`](packages/viewport-mouse) | Resolves TUI mouse clicks to the transcript components under them and publishes them as events other extensions can subscribe to. Requires Pi's fullscreen TUI mode. |
+| [`pi-viewport-mouse`](packages/viewport-mouse) | **Deprecated, no longer maintained.** Resolves TUI mouse clicks to the transcript components under them and publishes them as events. Pi routes component clicks natively; nothing here needs it. |
 | [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi 0.99 native fullscreen clicks; no mouse extension is required. |
 
 The packages can work together but neither depends on the other. Pi 0.99 routes component clicks
@@ -19,7 +19,7 @@ additional click events for consumers. Regular mode remains keyboard-only.
 Install a single package from npm:
 
 ```bash
-pi install npm:pi-viewport-mouse
+pi install npm:pi-visor
 ```
 
 You can also install every extension in this repository at once from git, which is useful for trying
