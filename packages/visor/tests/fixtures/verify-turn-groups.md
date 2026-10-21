@@ -24,8 +24,7 @@ PI_CODING_AGENT_DIR="$ROOT/agent" VISOR_VERIFY_ROOT="$ROOT" PI_TELEMETRY=0 \
   -e builtin:codemode --tools bash,read,edit,codemode,google_search
 ```
 
-For the combined-package route, add `-e "$REPO/packages/viewport-mouse/index.ts"` to the same
-launch. For regular mode use `--tui-mode regular`. For resume retain ROOT and add `--continue`.
+For regular mode use `--tui-mode regular`. For resume retain ROOT and add `--continue`.
 The fixture preserves files modified by native edit rather than overwriting them on resume.
 
 ## Inputs and required captures

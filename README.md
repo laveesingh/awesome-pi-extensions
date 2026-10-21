@@ -7,12 +7,10 @@ and **published to npm on its own** — this repository is the workspace, not th
 
 | Package | What it does |
 |---|---|
-| [`pi-viewport-mouse`](packages/viewport-mouse) | **Deprecated, no longer maintained.** Resolves TUI mouse clicks to the transcript components under them and publishes them as events. Pi routes component clicks natively; nothing here needs it. |
-| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi 0.99 native fullscreen clicks; no mouse extension is required. |
+| [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi's native fullscreen clicks; no mouse extension is required. |
 
-The packages can work together but neither depends on the other. Pi 0.99 routes component clicks
-natively, so `pi-visor` run frames work without `pi-viewport-mouse`. The mouse package publishes
-additional click events for consumers. Regular mode remains keyboard-only.
+`pi-viewport-mouse` was deprecated and removed from this repository (last version 0.1.1 on npm).
+Regular mode remains keyboard-only.
 
 ## Install
 
@@ -37,7 +35,7 @@ repository from git would load it twice.
 
 ## Development
 
-Requires Node 22.19.0 or newer, matching Pi 0.99.1.
+Requires Node 22.19.0 or newer, matching Pi 1.3.0.
 
 ```bash
 npm install          # installs all workspaces
@@ -49,14 +47,14 @@ npm run check        # both
 To work on one package:
 
 ```bash
-cd packages/viewport-mouse
+cd packages/visor
 npm test
 ```
 
 To try a working copy in Pi without installing it:
 
 ```bash
-pi -e ./packages/viewport-mouse
+pi -e ./packages/visor
 ```
 
 Extensions ship as TypeScript source — Pi loads `.ts` directly, so there is no build step. Follow the

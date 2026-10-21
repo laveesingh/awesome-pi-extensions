@@ -7,7 +7,6 @@ Only the latest published version of each package receives fixes.
 | Package | Supported |
 |---|---|
 | `pi-visor` | latest (0.2.x) |
-| `pi-viewport-mouse` | latest (0.1.x) |
 
 ## Reporting a vulnerability
 
