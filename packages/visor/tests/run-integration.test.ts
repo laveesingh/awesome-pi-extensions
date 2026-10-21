@@ -143,7 +143,7 @@ test("replay preserves every recorded native leaf order, user boundary, final/no
       assert.equal(group.expanded, false);
       assert.ok(group.entries.every((child: any) => child.kind === "row" || !child.expanded));
       assert.match(plain(group), /Run 1 · Interrupted/);
-      assert.match(plain(group), /0 errors/);
+      assert.doesNotMatch(plain(group), /error/, "zero errors are not shown");
     }
   });
   assert.ok(queueChecked && emptyChecked && rebuildChecked);
@@ -406,4 +406,79 @@ test("live instance capture is idempotent; native status duplicate detection and
   reloaded.dispose();
   assert.equal(groupingForMode(mode), undefined);
   assert.equal(mode.showStatus, nativeStatus);
+});
+
+// ── Per-run tokens (0.2.3) ───────────────────────────────────────────────────
+const usage = (input: number, cacheRead: number, output: number) => ({ input, cacheRead, cacheWrite: 0, output, totalTokens: 0 });
+const toolTurn = (timestamp: number, id: string, u: ReturnType<typeof usage>) => ({ role: "assistant", timestamp, stopReason: "toolUse", usage: u,
+  content: [{ type: "text", text: "Commentary " + id }, { type: "toolCall", id, name: "fixture_hold", arguments: {} }] });
+const finalTurn = (timestamp: number, u: ReturnType<typeof usage>) => ({ role: "assistant", timestamp, stopReason: "stop", usage: u, content: [{ type: "text", text: "Done" }] });
+const userTurn = (timestamp: number, text: string) => ({ role: "user", timestamp, content: [{ type: "text", text }] });
+const turnHistory = () => [userTurn(900, "go"), toolTurn(1000, "a", usage(100, 2000, 30)), toolTurn(2000, "b", usage(10, 3000, 5)),
+  userTurn(3000, "steer"), toolTurn(3100, "c", usage(7, 8, 9)), finalTurn(4000, usage(50, 1000, 20))];
+const nativeTool = (id: string) => new Pi.ToolExecutionComponent("fixture_hold", id, {}, {}, undefined, nativeUi, process.cwd());
+
+/** A mode that adds components the way Pi does, live (events) and when rebuilding history. */
+function usageMode() {
+  const chat = new Container();
+  const mode: any = { chatContainer: chat, pendingTools: new Map(), ui: { requestRender() {} }, showStatus() {}, addCustomEntryToChat() {},
+    async handleEvent(event: any) {
+      const message = event.message;
+      if (event.type === "message_start" && message.role === "assistant") { this.streamingComponent = new Pi.AssistantMessageComponent(undefined); chat.addChild(this.streamingComponent); }
+      else if (event.type === "message_start" && message.role === "user") chat.addChild(new Pi.UserMessageComponent("user"));
+      else if (event.type === "message_end" && message.role === "assistant") {
+        this.streamingComponent.updateContent(message, false);
+        for (const call of message.content.filter((block: any) => block.type === "toolCall")) chat.addChild(nativeTool(call.id));
+      }
+    },
+    addMessageToChat(message: any) {
+      if (message.role === "user") { chat.addChild(new Pi.UserMessageComponent("user")); return; }
+      chat.addChild(new Pi.AssistantMessageComponent(message));
+      for (const call of message.content.filter((block: any) => block.type === "toolCall")) chat.addChild(nativeTool(call.id));
+    },
+    renderSessionItems(items: any[]) { chat.clear(); for (const item of items) this.addMessageToChat(item); },
+  };
+  const grouping = new RunGrouping();
+  grouping.capture(mode, { theme: theme(), notify() {} });
+  return { mode, chat, grouping, controller: groupingForMode(mode)! };
+}
+const tokensOf = (controller: TranscriptGrouping) => controller.frames.map((frame) => frame.tokens);
+
+test("per-run tokens: two runs in one turn sum separately, and a rebuild from history gives the same numbers once", async () => {
+  const expected = [{ input: 110, cache: 5000, output: 35 }, { input: 57, cache: 1008, output: 29 }];
+  const live = usageMode();
+  live.controller.begin();
+  for (const item of turnHistory()) {
+    for (const type of item.role === "assistant" ? ["message_start", "message_end"] : ["message_start"]) await live.mode.handleEvent({ type, message: item });
+  }
+  live.controller.finish();
+  assert.deepEqual(tokensOf(live.controller), expected, "live: the final response counts toward the run it ends");
+  assert.match(plain(live.controller.frames[0].group), /↑ 110 ⚡ 5\.0K ↓ 35/);
+  assert.match(plain(live.controller.frames[1].group), /↑ 57 ⚡ 1\.0K ↓ 29/);
+
+  const rebuilt = usageMode();
+  rebuilt.mode.renderSessionItems(turnHistory());
+  assert.deepEqual(tokensOf(rebuilt.controller), expected, "rebuilt from history");
+  rebuilt.mode.renderSessionItems(turnHistory());
+  assert.deepEqual(tokensOf(rebuilt.controller), expected, "a second rebuild replaces the frames and does not add to them");
+  const again = toolTurn(5000, "d", usage(10, 0, 0));
+  rebuilt.controller.addUsage(again as never); rebuilt.controller.addUsage(again as never);
+  assert.equal(rebuilt.controller.frames.at(-1)!.tokens!.input, 57 + 10, "one message object counts once, in the run open at that moment");
+  live.grouping.dispose(); rebuilt.grouping.dispose();
+});
+
+test("per-run tokens: a turn without tools has no frame, and zero usage leaves the block without a token segment", async () => {
+  const flat = usageMode();
+  flat.controller.begin();
+  await flat.mode.handleEvent({ type: "message_start", message: userTurn(1, "hi") });
+  const direct = finalTurn(2, usage(5, 5, 5));
+  await flat.mode.handleEvent({ type: "message_start", message: direct }); await flat.mode.handleEvent({ type: "message_end", message: direct });
+  assert.equal(flat.controller.frames.length, 0);
+  flat.grouping.dispose();
+
+  const zero = usageMode();
+  zero.mode.renderSessionItems([userTurn(1, "go"), toolTurn(2, "z", usage(0, 0, 0))]);
+  assert.deepEqual(tokensOf(zero.controller), [undefined]);
+  assert.ok(!plain(zero.controller.frames[0].group).includes("↑"));
+  zero.grouping.dispose();
 });

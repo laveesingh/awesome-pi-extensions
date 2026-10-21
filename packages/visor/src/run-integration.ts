@@ -2,6 +2,7 @@ import { InteractiveMode, type ExtensionAPI, type ExtensionContext } from "@eare
 import type { Component } from "@earendil-works/pi-tui";
 import { RunGroup } from "./run-group.js";
 import { CommentaryRunChild, ToolRunChild } from "./run-child.js";
+import type { RunTokens } from "./run-status.js";
 import type { RecordedTiming, ThemeSource } from "./run-style.js";
 
 export interface TranscriptContainer {
@@ -15,6 +16,7 @@ export interface TranscriptMessage {
   role: string;
   timestamp?: number;
   stopReason?: string;
+  usage?: { input?: number; output?: number; cacheRead?: number };
   toolCallId?: string;
   content?: string | Array<{ type: string; id?: string; text?: string }>;
 }
@@ -24,6 +26,7 @@ export interface FrameRecord {
   first?: number;
   last?: number;
   startWall?: number;
+  tokens?: RunTokens;
   live: boolean;
   acceptsRows: boolean;
   hasFirst: boolean;
@@ -56,6 +59,7 @@ export class TranscriptGrouping {
   private notes = new WeakMap<object, { view: CommentaryRunChild; start?: number }>();
   private tools = new Map<string, { component: Component; view: ToolRunChild; frame: FrameRecord }>();
   private times = new Map<string, ToolTime>();
+  private counted = new WeakSet<object>();
   private original: Pick<TranscriptContainer, "addChild" | "removeChild" | "clear" | "render">;
   private undo: Array<() => void> = [];
   private arrayUndo?: () => void;
@@ -279,6 +283,21 @@ export class TranscriptGrouping {
     this.live = false;
     // Each frame evaluates its own touched/error/interruption state exactly once.
   }
+  /**
+   * Add one assistant message's usage to the run it ends in, once. Live messages and rebuilt
+   * history reach this through different seams, so the message object itself is the guard.
+   */
+  addUsage(message: TranscriptMessage): void {
+    const frame = this.current;
+    if (!this.active || !frame || message.role !== "assistant" || !message.usage || this.counted.has(message)) return;
+    this.counted.add(message);
+    const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+    const tokens = { input: count(frame.tokens?.input) + count(message.usage.input),
+      cache: count(frame.tokens?.cache) + count(message.usage.cacheRead), output: count(frame.tokens?.output) + count(message.usage.output) };
+    if (tokens.input + tokens.cache + tokens.output === 0) return;
+    frame.tokens = tokens;
+    frame.group.setMetadata({ tokens });
+  }
   private elapsed(frame: FrameRecord): number | undefined {
     return frame.startWall === undefined ? undefined : Math.max(0, this.now() - frame.startWall);
   }
@@ -334,7 +353,7 @@ export class TranscriptGrouping {
     for (const undo of this.componentUndo.splice(0).reverse()) undo();
     for (const frame of this.frames) frame.group.clear();
     this.frames.length = 0; this.cycleFrames.clear(); this.times.clear(); this.tools.clear();
-    this.owners = new WeakMap(); this.notes = new WeakMap(); this.toolUndo = new WeakMap();
+    this.owners = new WeakMap(); this.notes = new WeakMap(); this.toolUndo = new WeakMap(); this.counted = new WeakSet();
     this.current = undefined; this.provisional = undefined; this.pendingRows = [];
     this.original.clear.call(this.chat); this.patchSplice();
   }
@@ -427,6 +446,7 @@ export class RunGrouping {
         if (ending && event.message.stopReason === "aborted") controller.stopPending(mode.pendingTools.values());
         await handle.call(mode, event);
         if (ending) controller.endAssistant(ending, event.message);
+        if (event.type === "message_end") controller.addUsage(event.message);
         if (event.type === "agent_settled") controller.finish();
       }));
       const addMessage = mode.addMessageToChat;
@@ -434,7 +454,7 @@ export class RunGrouping {
         const previous = controller.message;
         controller.beforeMessage(message);
         try { return addMessage.call(mode, message, ...args); }
-        finally { controller.message = previous; }
+        finally { controller.message = previous; controller.addUsage(message); }
       }));
       const rebuild = mode.renderSessionItems;
       undo.push(replace(mode, "renderSessionItems", (items: TranscriptMessage[], ...args: unknown[]) => {

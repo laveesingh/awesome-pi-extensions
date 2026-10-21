@@ -35,7 +35,7 @@ function tool(name: string, args: unknown, text?: string, error = false, details
 
 // A small fixed fixture covers every visual row; real native definitions have separate checks below.
 function fixture(state: string) {
-  const group = new RunGroup({ index: 1, timestamp: start, durationMs: state === "live" ? 3000 : 27000, live: state === "live",
+  const group = new RunGroup({ index: 1, timestamp: start, durationMs: state === "live" ? 3000 : 27000, live: state === "live", tokens: { input: 1200, cache: 34000, output: 560 },
     outcome: state === "error" ? "error" : state === "interrupted" ? "interrupted" : "success" }, currentTheme, state !== "A");
   const note = group.addCommentary(new Pi.AssistantMessageComponent(message("Trace the settled duration.\nKeep the native diff.")), { timestamp: start, durationMs: 1000 });
   const first = group.addTool(tool("bash", { command: "printf hello" }, "hello\nworld"), { timing: { timestamp: start + 1000, durationMs: 136 } });
@@ -69,7 +69,7 @@ test("frame uses the exact current Pi semantic colors", () => {
   }
   assert.ok(calls.some(([color, text]) => color === "accent" && /▸|▾/.test(text)));
   assert.ok(calls.some(([color, text]) => color === "text" && text.includes("Run 2")));
-  assert.ok(calls.some(([color, text]) => color === "muted" && text.includes("1 tool • 0 notes")));
+  assert.ok(calls.some(([color, text]) => color === "muted" && text === "1 tool"));
   assert.ok(calls.some(([color, text]) => color === "borderMuted" && text.includes("┌")));
   assert.equal(themeModule.getResolvedThemeColors("dark").borderMuted, "#768186");
 });
@@ -110,7 +110,7 @@ test("missing or invalid timing has no invented separators; stopped tools are no
   group.addCommentary(new Pi.AssistantMessageComponent(message("One note")), { timestamp: NaN, durationMs: -1 });
   group.addTool(tool("bash", {}, "interrupted", true), { timing: {}, stopped: true });
   const lines = plain(group.render(120));
-  assert.ok(lines.some((line) => line.includes("1 tool • 1 note • 0 errors · stopped after 0 tools · kept open (ctrl+o)")));
+  assert.ok(lines.some((line) => line.includes("1 tool · 1 note · stopped after 0 tools")));
   assert.ok(lines.some((line) => line.includes("↳ 1 line (ctrl+o)")));
   assert.ok(!lines.some((line) => /Error ·|0ms|\d\d:\d\d:\d\d|•\s*\(ctrl/.test(line)));
 });
@@ -159,10 +159,10 @@ test("commentary open form and supplied partial timing retain exact rows at 80 a
     ]);
     note.setMetadata({ timestamp: NaN, durationMs: 2000 });
     assert.equal(plain(note.render(width))[1].trimEnd(), " ↳ 2 lines • 2s (ctrl+o)");
-    const group = new RunGroup({ index: 1, keptOpen: true }, currentTheme, true);
+    const group = new RunGroup({ index: 1 }, currentTheme, true);
     group.addTool(tool("bash", {}, "body"), { timing: { durationMs: 42 } });
     const rows = plain(group.render(width));
-    assert.ok(rows.some((line) => line.includes("0 errors · kept open (ctrl+o)")));
+    assert.ok(!rows.some((line) => /error|kept open/.test(line)), "zero errors and the old kept-open hint are not shown");
     assert.ok(rows.some((line) => line.includes("↳ 1 line • 42ms (ctrl+o)")));
   }
 });
@@ -178,8 +178,9 @@ test("every parent count is singular at one and plural otherwise, including stop
     }
     const text = plain(group.render(120)).join("\n");
     const tools = count + 1;
-    assert.ok(text.includes(`${tools} ${tools === 1 ? "tool" : "tools"} • ${count} ${count === 1 ? "note" : "notes"} • ${count} ${count === 1 ? "error" : "errors"}`));
-    assert.ok(text.includes(`stopped after ${count} ${count === 1 ? "tool" : "tools"}`));
+    const counts = [`${tools} ${tools === 1 ? "tool" : "tools"}`, `${count} ${count === 1 ? "note" : "notes"}`,
+      ...(count ? [`${count} ${count === 1 ? "error" : "errors"}`] : []), `stopped after ${count} ${count === 1 ? "tool" : "tools"}`];
+    assert.ok(text.includes(counts.join(" · ")), counts.join(" · "));
   }
 });
 
@@ -299,7 +300,7 @@ for (const width of [1, 4, 20, 80, 120]) {
     check("native argument revision");
     for (const f of both) f.settled.setMetadata({ stopped: true, timing: { timestamp: start, durationMs: 321 } });
     check("stopped/result metadata changes");
-    for (const f of both) f.group.setMetadata({ durationMs: 9000, outcome: "interrupted", keptOpen: true });
+    for (const f of both) f.group.setMetadata({ durationMs: 9000, outcome: "interrupted", tokens: { input: 1200, cache: 34000, output: 560 } });
     check("fresh parent status/duration/counts");
     for (const f of both) f.group.setLayerExpanded(false);
     check("fold parent");
@@ -487,4 +488,101 @@ test("native edit/read and complete codemode output follow D10; flat output and 
       assert.deepEqual(plain(excludedView.render(80)), before);
     } finally { EXCLUDED.delete("read"); }
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+// ── Status block (0.2.3): one two-row block in the header, the footer and the collapsed box ──
+const click = (group: RunGroup, y: number, width: number, height: number) => group.handleMouse({
+  type: "click", button: "left", x: 5, y, screenX: 5, screenY: y, width, height, shift: false, alt: false, ctrl: false });
+function statusFixture(options: { errors?: number; live?: boolean; tokens?: { input: number; cache: number; output: number } } = {}) {
+  const group = new RunGroup({ index: 3, timestamp: start, durationMs: 83000, live: options.live, tokens: options.tokens }, currentTheme, true);
+  group.addCommentary(new Pi.AssistantMessageComponent(message("One note")), { timestamp: start });
+  group.addTool(tool("bash", { command: "echo ok" }, "ok"), { timing: { timestamp: start } });
+  for (let i = 0; i < (options.errors ?? 0); i++) group.addTool(tool("bash", { command: "false" }, "boom", true), { timing: {} });
+  if (options.live) group.addTool(tool("bash", { command: "sleep 9" }), { timing: {} });
+  return group;
+}
+/** Header rows are lines 1-2; footer rows are the two lines above the closing border. */
+const blocks = (lines: string[]) => ({ header: lines.slice(1, 3), footer: lines.slice(-3, -1) });
+
+for (const width of [110, 80]) {
+  test(`header, footer and collapsed box render the same status block at ${width} columns`, () => {
+    const group = statusFixture({ errors: 1, tokens: { input: 1234, cache: 56000, output: 789 } });
+    const lines = group.render(width);
+    const { header, footer } = blocks(lines);
+    assert.equal(footer[1], header[1], "row 2 is byte-equal");
+    assert.equal(stripTerminalSequences(footer[0]), stripTerminalSequences(header[0]).replace("▾", "▴"), "row 1 differs only by the arrow");
+    const row2 = stripTerminalSequences(header[1]);
+    assert.match(row2, /^│ {3}1m23s · 2 tools · 1 note · 1 error · ↑ 1\.2K ⚡ 56K ↓ 789 +│$/);
+    assert.match(stripTerminalSequences(header[0]), /^│ ▾ ● Run 3 · Worked · recovered {2,}10:04:12 │$/);
+    assert.ok(!plain(lines).join("\n").match(/End of run|Run in progress|kept open/));
+    group.setLayerExpanded(false);
+    const collapsed = group.render(width);
+    assert.equal(collapsed.length, 4, "top border, two block rows, bottom border");
+    assert.equal(collapsed[2], header[1]);
+    assert.equal(stripTerminalSequences(collapsed[1]), stripTerminalSequences(header[0]).replace("▾", "▸"));
+    for (const line of [...lines, ...collapsed]) assert.equal(visibleWidth(line), width);
+  });
+}
+
+test("errors are hidden at zero and drawn in the error colour otherwise; tools and notes always show", () => {
+  const calls: Array<[string, string]> = [];
+  const base = currentTheme();
+  const recording: RunTheme = { fg: (color, text) => { calls.push([color, text]); return base.fg(color, text); }, bg: base.bg.bind(base), bold: base.bold.bind(base) };
+  const clean = new RunGroup({ index: 1 }, () => recording, false);
+  clean.addTool(tool("bash", {}, "ok"), { timing: {} });
+  assert.ok(!plain(clean.render(100)).join("\n").includes("error"));
+  assert.ok(calls.some(([color, text]) => color === "muted" && text === "1 tool") && calls.some(([, text]) => text === "0 notes"));
+  calls.length = 0;
+  const failed = new RunGroup({ index: 1 }, () => recording, false);
+  failed.addTool(tool("bash", {}, "no", true), { timing: {} });
+  assert.ok(plain(failed.render(100)).join("\n").includes("1 tool · 0 notes · 1 error"));
+  assert.ok(calls.some(([color, text]) => color === "error" && text === "1 error"));
+});
+
+test("tokens use the turn bar's formatter and are omitted until the run has usage", () => {
+  assert.ok(!plain(statusFixture().render(100)).join("\n").includes("↑"));
+  const text = plain(statusFixture({ tokens: { input: 1_234_567, cache: 999, output: 12_345 } }).render(100)).join("\n");
+  assert.ok(text.includes("↑ 1.2M ⚡ 999 ↓ 12K"));
+});
+
+test("while live the duration ticks and running tools are counted; a settled run drops the count", () => {
+  const live = statusFixture({ live: true });
+  assert.ok(plain(live.render(100))[2].includes("1m23s · 2 tools (1 running) · 1 note"));
+  live.setMetadata({ durationMs: 84000 });
+  assert.ok(plain(live.render(100))[2].includes("1m24s · "));
+  const settled = statusFixture();
+  assert.ok(!plain(settled.render(100)).join("\n").includes("running"));
+});
+
+test("a narrow block wraps row 2 between segments with the two-cell indent and never clips a count", () => {
+  const group = statusFixture({ errors: 2, tokens: { input: 1200, cache: 34000, output: 560 } });
+  group.setMetadata({ outcome: "interrupted" });
+  const lines = group.render(40);
+  for (const line of lines) assert.equal(visibleWidth(line), 40);
+  const rows = plain(lines).slice(1, lines.length).filter((line, i) => i < lines.indexOf(lines.find((l) => stripTerminalSequences(l).startsWith("├"))!) - 1);
+  assert.ok(rows.length >= 4, "row 2 wrapped onto several rows");
+  assert.ok(rows.slice(1).every((line) => line.startsWith("│   ")), "wrapped rows keep the indent");
+  const body = rows.slice(1).map((line) => line.slice(1, -1).trim()).join(" | ");
+  for (const segment of ["1m23s", "3 tools", "1 note", "2 errors", "stopped after 3 tools", "↑ 1.2K ⚡ 34K ↓ 560"]) {
+    assert.ok(body.split(" | ").some((row) => row.split(" · ").includes(segment)), `${segment} sits whole on one row`);
+  }
+  // Row 1: the time moves after the status when it cannot be right-aligned.
+  const tight = plain(statusFixture().render(24));
+  assert.ok(tight.slice(1, 4).join(" ").includes("10:04:12"));
+  for (const line of statusFixture().render(24)) assert.equal(visibleWidth(line), 24);
+});
+
+test("the footer block is a click target that folds the box, like the header", () => {
+  const probe = () => statusFixture({ tokens: { input: 1, cache: 2, output: 3 } });
+  const lines = probe().render(80);
+  const divider = lines.length - 4; // ├ above the footer block; the block follows, then └
+  assert.ok(stripTerminalSequences(lines[divider]).startsWith("├"));
+  for (const y of [divider, divider + 1, divider + 2, divider + 3]) {
+    const group = probe(); group.render(80);
+    assert.ok(click(group, y, 80, lines.length), `row ${y} is a click target`);
+    assert.equal(group.expanded, false);
+  }
+  const group = probe(); group.render(80);
+  click(group, group.childRows[0].start, 80, lines.length);
+  assert.equal(group.expanded, true, "a child row toggles the child, not the box");
 });
