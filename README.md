@@ -8,6 +8,7 @@ and **published to npm on its own** — this repository is the workspace, not th
 | Package | What it does |
 |---|---|
 | [`pi-visor`](packages/visor) | A heads-up layer for the transcript: live turn bar, one-line thinking summaries, and two-line tool blocks that expand on click or `ctrl+o`. Uses Pi's native fullscreen clicks; no mouse extension is required. |
+| [`pi-recap`](packages/recap) | Ephemeral last-run recaps: a configurable chat model summarizes each settled run as a Claude Code-style status line, never added to context. Requires Pi 1.3.0. |
 
 `pi-viewport-mouse` was deprecated and removed from this repository (last version 0.1.1 on npm).
 Regular mode remains keyboard-only.
