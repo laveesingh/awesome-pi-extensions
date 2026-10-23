@@ -5,7 +5,11 @@ import { Container, ScrollView, Text, TuiAltScreen, type TuiMouseEvent } from "@
 import { ThinkingManager, type ThoughtLine } from "../src/thinking.js";
 import { RunGroup } from "../src/run-group.js";
 import { patchToolExecutionComponent } from "../src/tool-display.js";
+import { getRegistry } from "../../viewport-mouse/src/registry.js";
+import { installMousePatch, uninstallMousePatch } from "../../viewport-mouse/src/patch.js";
+import { ClickToExpand } from "./fixtures/baseline-click-to-expand.js";
 import visorExtension from "../index.js";
+import viewportMouseExtension from "../../viewport-mouse/index.js";
 // @ts-expect-error Plain-JS profiling fixtures deliberately have no declaration package.
 import { mockTerminal } from "./fixtures/profiling-fixture.js";
 // @ts-expect-error Read-only geometry helper observes real render caches, never rerenders.
@@ -94,26 +98,31 @@ test("normalized native thought handler ignores bounds, press/release, non-prima
   assert.equal(line.expanded, true); assert.equal(owner.__visorThinkExpanded, true); assert.equal(owner.calls, 1);
 });
 
-test("actual native grouped thought/commentary press-release keeps independent states", () => {
-  const group = new RunGroup({ index: 1, live: true }, () => tm.theme);
-  const a = assistant(); const note = group.addCommentary(a.owner); group.addTool(tool());
-  const doc = new Container(); doc.addChild(group);
-  const f = screenFixture(doc);
-  try {
-    let row = group.childRows.find((r) => r.child === note)!;
-    const base = f.bounds(group);
-    f.gesture(point(base, row.start)); assert.equal(note.expanded, true);
-    row = group.childRows.find((r) => r.child === note)!;
-    const thought = note.thoughtLayout(row.width)[0];
-    f.gesture(point(f.bounds(group), row.start + thought.start));
-    assert.equal(a.owner.expanded, true); assert.equal(note.expanded, true);
-    row = group.childRows.find((r) => r.child === note)!;
-    f.gesture(point(f.bounds(group), row.start + row.height - 1));
-    assert.equal(note.expanded, false); assert.equal(a.owner.expanded, true);
-    group.setExpanded(false); f.paint(); assert.equal(a.owner.expanded, true, "note thought remains independent of text-note cascade");
-    group.setExpanded(true); f.paint(); assert.equal(note.expanded, true);
-  } finally { f.close(); }
-});
+for (const combined of [false, true]) {
+  test(`actual native grouped thought/commentary press-release keeps independent states (${combined ? "viewport passive client" : "visor only"})`, () => {
+    if (combined) installMousePatch(); else uninstallMousePatch();
+    const unsubscribe = combined ? getRegistry().on("native-mouse-passive-test", () => false) : () => {};
+    const group = new RunGroup({ index: 1, live: true }, () => tm.theme);
+    const a = assistant(); const note = group.addCommentary(a.owner); group.addTool(tool());
+    const doc = new Container(); doc.addChild(group);
+    const f = screenFixture(doc);
+    try {
+      let row = group.childRows.find((r) => r.child === note)!;
+      const base = f.bounds(group);
+      f.gesture(point(base, row.start)); assert.equal(note.expanded, true);
+      row = group.childRows.find((r) => r.child === note)!;
+      const thought = note.thoughtLayout(row.width)[0];
+      f.gesture(point(f.bounds(group), row.start + thought.start));
+      assert.equal(a.owner.expanded, true); assert.equal(note.expanded, true);
+      row = group.childRows.find((r) => r.child === note)!;
+      f.gesture(point(f.bounds(group), row.start + row.height - 1));
+      assert.equal(note.expanded, false); assert.equal(a.owner.expanded, true);
+      group.setExpanded(false); f.paint(); assert.equal(a.owner.expanded, true, "note thought remains independent of text-note cascade");
+      group.setExpanded(true); f.paint(); assert.equal(note.expanded, true);
+      if (combined) assert.ok(getRegistry().handlers.has("native-mouse-passive-test"));
+    } finally { f.close(); unsubscribe(); uninstallMousePatch(); }
+  });
+}
 
 test("actual native selection drag, non-primary input and links do not toggle managed thought", () => {
   const a = assistant(), doc = new Container(); doc.addChild(a.owner);
@@ -132,33 +141,50 @@ test("actual native selection drag, non-primary input and links do not toggle ma
   } finally { f.close(); }
 });
 
-test("native ownership survives factory reload", () => {
-  const createRuntime = () => {
-    const shutdown: Array<(event: any) => void> = [];
-    const pi = new Proxy({ on(event: string, fn: any) { if (event === "session_shutdown") shutdown.push(fn); } },
-      { get(target, key) { return key in target ? (target as any)[key] : () => {}; } });
-    visorExtension(pi as never);
-    return () => { for (const handler of shutdown) handler({ reason: "reload" }); };
-  };
-  for (let reload = 0; reload < 3; reload++) {
-    const stop = createRuntime();
-    const a = assistant(), c = tool(), doc = new Container(); doc.addChild(c); doc.addChild(a.owner);
-    const f = screenFixture(doc);
-    let calls = 0; const set = c.setExpanded.bind(c); c.setExpanded = (value) => { calls++; set(value); };
+for (const order of ["visor-only", "visor-first", "viewport-first"]) {
+  test(`native ownership and independent subscriber survive factory load order/reload (${order})`, () => {
+    uninstallMousePatch();
+    const registry = getRegistry();
+    const off = registry.on("native-mouse-independent-client", () => false);
+    const createRuntime = () => {
+      const shutdown: Array<(event: any) => void> = [];
+      const pi = new Proxy({ on(event: string, fn: any) { if (event === "session_shutdown") shutdown.push(fn); } },
+        { get(target, key) { return key in target ? (target as any)[key] : () => {}; } });
+      if (order === "viewport-first") viewportMouseExtension(pi as never);
+      visorExtension(pi as never);
+      if (order === "visor-first") viewportMouseExtension(pi as never);
+      return () => { for (const handler of shutdown) handler({ reason: "reload" }); };
+    };
     try {
-      f.gesture(point(firstMouseRegion(f.bounds(c)))); assert.equal(calls, 1); assert.equal((c as any).expanded, true);
-      f.gesture(point(f.bounds(a.line()))); assert.equal(a.owner.expanded, true);
-    } finally { f.close(); stop(); }
-  }
-});
+      for (let reload = 0; reload < 3; reload++) {
+        const stop = createRuntime();
+        assert.equal(registry.handlers.has("pi-visor.click-to-expand"), false, "candidate never registers the superseded subscriber");
+        assert.ok(registry.handlers.has("native-mouse-independent-client"));
+        const a = assistant(), c = tool(), doc = new Container(); doc.addChild(c); doc.addChild(a.owner);
+        const f = screenFixture(doc);
+        let calls = 0; const set = c.setExpanded.bind(c); c.setExpanded = (value) => { calls++; set(value); };
+        try {
+          f.gesture(point(firstMouseRegion(f.bounds(c)))); assert.equal(calls, 1); assert.equal((c as any).expanded, true);
+          f.gesture(point(f.bounds(a.line()))); assert.equal(a.owner.expanded, true);
+        } finally { f.close(); stop(); }
+        assert.ok(registry.handlers.has("native-mouse-independent-client"), "reload must not clear external clients");
+      }
+    } finally { off(); uninstallMousePatch(); }
+  });
+}
 
-test("actual standalone native tool toggles once", () => {
+test("actual standalone tool reproduces baseline double toggle; native-only path toggles once", () => {
   const c = tool(), doc = new Container(); doc.addChild(c);
-  const f = screenFixture(doc);
+  const f = screenFixture(doc); const legacy = new ClickToExpand();
   let toggles = 0; const set = c.setExpanded.bind(c);
   c.setExpanded = (value) => { toggles++; set(value); };
   try {
+    uninstallMousePatch();
     f.gesture(point(firstMouseRegion(f.bounds(c))));
     assert.equal(toggles, 1); assert.equal((c as any).expanded, true);
-  } finally { f.close(); }
+    c.setExpanded(false); toggles = 0; f.paint();
+    legacy.install({ on() {} } as never); installMousePatch();
+    f.gesture(point(firstMouseRegion(f.bounds(c))));
+    assert.equal(toggles, 2); assert.equal((c as any).expanded, false, "known baseline dual ownership is real, not only a timing claim");
+  } finally { legacy.dispose(); uninstallMousePatch(); f.close(); }
 });

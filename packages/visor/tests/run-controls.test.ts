@@ -6,7 +6,10 @@ import { RunGroup } from "../src/run-group.js";
 import { RunGrouping, TranscriptGrouping, groupingForMode } from "../src/run-integration.js";
 import { CommentaryRunChild } from "../src/run-child.js";
 import { ThinkingManager } from "../src/thinking.js";
+import { ClickToExpand } from "./fixtures/baseline-click-to-expand.js";
 import { patchToolExecutionComponent } from "../src/tool-display.js";
+import { installMousePatch } from "../../viewport-mouse/src/patch.js";
+import { getRegistry } from "../../viewport-mouse/src/registry.js";
 
 const tm = await import(new URL("./modes/interactive/theme/theme.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
 Pi.initTheme("dark");
@@ -35,64 +38,71 @@ function fixture() {
   return { group, note, c, view };
 }
 
-test("native chrome/child/thought routing toggles once", () => {
-  const { group, note, c, view } = fixture();
-  const doc = new Container(); doc.addChild(group);
-  let nativeCalls = 0;
-  const target: any = { prototype: { handleViewportInput(this: any, data: string) {
-    nativeCalls++;
-    const match = /^\x1b\[<0;(\d+);(\d+)m$/.exec(data);
-    if (!match) return;
-    const x = Number(match[1]) - 1, y = Number(match[2]) - 1;
-    return doc.handleMouse({ ...event(group, y, x), height: doc.render(80).length });
-  } } };
-  const scroll: any = { child: doc, scrollTop: 0, getContentWidth: (width: number) => width };
-  const instance: any = Object.create(target.prototype);
-  const paint = () => {
-    const lines = doc.render(80);
-    instance.currentLayout = { root: { scrollView: scroll, rect: { x: 0, y: 0, width: 80, height: lines.length }, scrollContentLines: lines } };
-    instance.getPrimaryScrollView = () => scroll;
-    instance.requestRender = () => {};
-  };
-  const click = (y: number, x = 5) => {
-    paint(); instance.selectionAnchor = { row: y }; instance.selectionDragged = false;
-    instance.handleViewportInput(`\x1b[<0;${x + 1};${y + 1}m`);
-  };
-  let changes = 0;
-  const set = c.setExpanded.bind(c);
-  c.setExpanded = (value) => { changes++; set(value); };
-  group.render(80);
-  click(group.childRows.find((row) => row.child === view)!.start);
-  assert.equal((c as any).expanded, true); assert.equal(changes, 1);
-  const open = group.render(80);
-  const toolRows = group.childRows.find((row) => row.child === view)!;
-  assert.ok(toolRows.height >= 6, "width-sensitive body really wraps inside the frame");
-  click(toolRows.start + toolRows.height - 1);
-  assert.equal((c as any).expanded, false); assert.equal(changes, 2);
-  click(group.childRows.find((row) => row.child === note)!.start);
-  assert.equal(note.expanded, true);
-  group.render(80);
-  const noteRows = group.childRows.find((row) => row.child === note)!;
-  const thought = note.thoughtLayout(noteRows.width)[0];
-  click(noteRows.start + thought.start);
-  assert.equal(thought.component.expanded, true); assert.equal(note.expanded, true);
-  // Header closure/reopen keeps the child layers untouched.
-  click(1); assert.equal(group.expanded, false); assert.equal(note.expanded, true);
-  click(1); assert.equal(group.expanded, true); assert.equal(note.expanded, true);
-  group.render(80);
-  const covered = new Set(group.childRows.flatMap((row) => Array.from({ length: row.height }, (_, i) => row.start + i)));
-  const painted = group.render(80);
-  const chrome = painted.map((line, y) => ({ line, y })).filter(({ line, y }) =>
-    y < 3 || /[┌├└]/.test(line) || line.includes("Run in progress") || line.includes("End of run")).map(({ y }) => y);
-  for (const y of chrome) {
-    group.setLayerExpanded(true); group.render(80); click(y);
-    assert.equal(group.expanded, false, `chrome row ${y} toggles only layer 1`);
-  }
-  group.setLayerExpanded(true); group.render(80);
-  click(group.childRows.find((row) => row.child === view)!.start, 0);
-  assert.equal(group.expanded, true, "child-region side columns are not parent chrome");
-  assert.ok(nativeCalls > 0);
-});
+for (const combined of [false, true]) {
+  test(`native chrome/child/thought routing toggles once (${combined ? "visor+viewport-mouse" : "visor only"})`, () => {
+    getRegistry().off("pi-visor.click-to-expand"); // only this test-owned frozen baseline subscriber
+    const clicks = new ClickToExpand();
+    clicks.install({ on() {} } as never);
+    const { group, note, c, view } = fixture();
+    const doc = new Container(); doc.addChild(group);
+    let nativeCalls = 0;
+    const target: any = { prototype: { handleViewportInput(this: any, data: string) {
+      nativeCalls++;
+      const match = /^\x1b\[<0;(\d+);(\d+)m$/.exec(data);
+      if (!match) return;
+      const x = Number(match[1]) - 1, y = Number(match[2]) - 1;
+      return doc.handleMouse({ ...event(group, y, x), height: doc.render(80).length });
+    } } };
+    if (combined) installMousePatch({ target });
+    const scroll: any = { child: doc, scrollTop: 0, getContentWidth: (width: number) => width };
+    const instance: any = Object.create(target.prototype);
+    const paint = () => {
+      const lines = doc.render(80);
+      instance.currentLayout = { root: { scrollView: scroll, rect: { x: 0, y: 0, width: 80, height: lines.length }, scrollContentLines: lines } };
+      instance.getPrimaryScrollView = () => scroll;
+      instance.requestRender = () => {};
+    };
+    const click = (y: number, x = 5) => {
+      paint(); instance.selectionAnchor = { row: y }; instance.selectionDragged = false;
+      instance.handleViewportInput(`\x1b[<0;${x + 1};${y + 1}m`);
+    };
+    let changes = 0;
+    const set = c.setExpanded.bind(c);
+    c.setExpanded = (value) => { changes++; set(value); };
+    group.render(80);
+    click(group.childRows.find((row) => row.child === view)!.start);
+    assert.equal((c as any).expanded, true); assert.equal(changes, 1);
+    const open = group.render(80);
+    const toolRows = group.childRows.find((row) => row.child === view)!;
+    assert.ok(toolRows.height >= 6, "width-sensitive body really wraps inside the frame");
+    click(toolRows.start + toolRows.height - 1);
+    assert.equal((c as any).expanded, false); assert.equal(changes, 2);
+    click(group.childRows.find((row) => row.child === note)!.start);
+    assert.equal(note.expanded, true);
+    group.render(80);
+    const noteRows = group.childRows.find((row) => row.child === note)!;
+    const thought = note.thoughtLayout(noteRows.width)[0];
+    click(noteRows.start + thought.start);
+    assert.equal(thought.component.expanded, true); assert.equal(note.expanded, true);
+    // Header closure/reopen keeps the child layers untouched.
+    click(1); assert.equal(group.expanded, false); assert.equal(note.expanded, true);
+    click(1); assert.equal(group.expanded, true); assert.equal(note.expanded, true);
+    group.render(80);
+    const covered = new Set(group.childRows.flatMap((row) => Array.from({ length: row.height }, (_, i) => row.start + i)));
+    const painted = group.render(80);
+    const chrome = painted.map((line, y) => ({ line, y })).filter(({ line, y }) =>
+      y < 3 || /[┌├└]/.test(line) || line.includes("Run in progress") || line.includes("End of run")).map(({ y }) => y);
+    for (const y of chrome) {
+      group.setLayerExpanded(true); group.render(80); click(y);
+      assert.equal(group.expanded, false, `chrome row ${y} toggles only layer 1`);
+    }
+    group.setLayerExpanded(true); group.render(80);
+    click(group.childRows.find((row) => row.child === view)!.start, 0);
+    assert.equal(group.expanded, true, "child-region side columns are not parent chrome");
+    assert.ok(nativeCalls > 0);
+    clicks.dispose();
+  });
+}
 
 test("gap rows and child-region side columns ignore clicks without changing touched or expansion", () => {
   const { group, note, view } = fixture(); group.render(80);
@@ -132,15 +142,26 @@ test("Ctrl+O cascades to both layers and late children, with D12 thought-only/te
   assert.equal(group.counts.notes, 3);
 });
 
-test("D11 thought-only owns its own toggle", () => {
-  const group = new RunGroup({ index: 1, live: true }, theme);
-  const thought = group.addCommentary(new Pi.AssistantMessageComponent(msg("", true)));
-  group.addTool(tool()); group.render(80);
-  const row = group.childRows.find((entry) => entry.child === thought)!;
-  group.handleMouse(event(group, row.start));
-  assert.equal(thought.thoughtLines[0].expanded, true); assert.equal(group.counts.notes, 0);
-  assert.equal(thought.expanded, false);
-});
+for (const combined of [false, true]) {
+  test(`D11 thought-only owns its own toggle (${combined ? "combined" : "native"})`, () => {
+    const group = new RunGroup({ index: 1, live: true }, theme);
+    const thought = group.addCommentary(new Pi.AssistantMessageComponent(msg("", true)));
+    group.addTool(tool()); group.render(80);
+    const row = group.childRows.find((entry) => entry.child === thought)!;
+    const clicks = new ClickToExpand(); clicks.install({ on() {} } as never);
+    if (combined) {
+      // Legacy chain is explicitly deferred; native gets the one actual toggle.
+      let matched = false;
+      const handler = getRegistry().handlers.get("pi-visor.click-to-expand")!;
+      const legacy: any = { closest: (predicate: (c: any) => boolean) => predicate(group) ? group : undefined, requestRender() {}, flash() {} };
+      assert.equal(handler(legacy), false); matched = true; assert.ok(matched);
+    }
+    group.handleMouse(event(group, row.start));
+    assert.equal(thought.thoughtLines[0].expanded, true); assert.equal(group.counts.notes, 0);
+    assert.equal(thought.expanded, false);
+    clicks.dispose();
+  });
+}
 
 test("per-frame settlement collapses untouched success once, preserving touched/error/interrupted exact state", () => {
   for (const state of ["success", "touched-open", "touched-closed", "error-open", "error-closed", "interrupted-open", "interrupted-closed"]) {

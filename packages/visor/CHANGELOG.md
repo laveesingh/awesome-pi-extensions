@@ -3,20 +3,6 @@
 All notable changes to `pi-visor` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.2] — 2026-10-21
-
-Tested on Pi 0.99.1 and 1.3.0. Requires Node 22.19.0 or newer.
-
-### Fixes
-
-- Call Pi's theme `fg` as a method. On Pi 1.3.0 the unbound call threw on every themed string
-  and fell back to a slow module lookup (about 62 ms each) that still returned unstyled text.
-  The fallback is now memoized.
-- Throttle turn-bar updates during streaming to at most one per 500 ms, and skip widget
-  updates when the rendered line has not changed.
-- Replace Pi's click-wrapped hidden-thinking label instead of rendering beside it, so each
-  thinking message shows one `● Thought …` line, not that line plus `Thinking...`.
-
 ## [0.2.1] — 2026-10-11
 
 Requires Pi 0.99.1 and Node 22.19.0 or newer.
