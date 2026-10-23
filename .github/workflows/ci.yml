@@ -1,0 +1,42 @@
+# Compatibility matrix: every package typechecks and tests against both the
+# pinned Pi release and the newest published Pi.
+#
+# Pi ships every few days and extensions reach deep into its internals
+# (prototype patches, model runtimes, TUI components), so version drift breaks
+# silently. The `pinned` track guards the committed lockfile; the `latest`
+# track fails as soon as a new Pi release breaks us — including on the weekly
+# schedule, even when nobody opened a PR.
+#
+# The `latest` track installs without saving so manifests and the lockfile are
+# never modified by CI; the overlay exists only inside the job's node_modules.
+name: pi-compat
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Monday 06:00 UTC: catch Pi releases that landed during the week.
+    - cron: "0 6 * * 1"
+
+jobs:
+  check:
+    name: node ${{ matrix.node }} / pi ${{ matrix.pi }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+        pi: [pinned, latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: overlay newest Pi (latest track only)
+        if: matrix.pi == 'latest'
+        run: npm install --no-save --no-audit --no-fund @earendil-works/pi-coding-agent@latest @earendil-works/pi-tui@latest
+      - name: report tested Pi version
+        run: node -e "console.log('pi-coding-agent:', require('./node_modules/@earendil-works/pi-coding-agent/package.json').version)"
+      - run: npm run check --workspaces --if-present
