@@ -8,18 +8,24 @@ it, as Pi renders it.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ ▸ ● Run 1 · Worked                                                   │
-│   8 tools • 3 notes • 27s • 0 errors • 10:04:12 (ctrl+o)             │
+│ ▸ ● Run 1 · Worked                                          10:04:12 │
+│   27s · 8 tools · 3 notes · ↑ 12K ⚡ 340K ↓ 4.1K                     │
 └──────────────────────────────────────────────────────────────────────┘
 
 The final response remains outside the frame.
 ```
 
+Row 1 is the run and its start time. Row 2 is the duration, tool and note counts (with `(n running)`
+while tools are executing), the error count only when it is not zero, and this run's tokens:
+`↑` uncached input, `⚡` cache reads, `↓` output, summed over the run's assistant messages. The same
+block heads the frame, closes an open frame (marked `▴`), and is all a collapsed frame shows, so a
+long run still tells you its status from the bottom.
+
 ## What it does
 
 | Surface | What you get |
 |---|---|
-| Run frame | Header and counts; one layer opens to compact children, a second opens each child |
+| Run frame | A status block (state, time, duration, counts, per-run tokens) at the top and bottom; one layer opens to compact children, a second opens each child |
 | Commentary | Header + line-count footer; expansion shows muted wrapped text and the managed thought line if present |
 | Tools | Two-line call/footer; expansion keeps the footer, repeats the call, then shows the full body or native diff |
 | Thinking | Managed thought summaries with their own expansion controls |
@@ -45,7 +51,7 @@ chat. A run without tools creates no frame.
 
 In **fullscreen mode**, click:
 
-- The header, metadata, declared separators and group-end/border rows to toggle only the parent layer. Child states are kept. Inter-child gaps and child-region side columns do nothing.
+- The status block at the top or bottom, the declared separators and the border rows to toggle only the parent layer. Child states are kept. Inter-child gaps and child-region side columns do nothing.
 - A tool or commentary child to toggle only that child.
 - A managed thought line to toggle only its reasoning, including a thinking-only member.
 

@@ -3,6 +3,27 @@
 All notable changes to `pi-visor` are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-10-21
+
+Tested on Pi 0.99.1 and 1.3.0. Requires Node 22.19.0 or newer.
+
+### Changes
+
+- Show one two-row status block in a run frame's header, in the footer of an open frame, and in
+  a collapsed frame. In a long run the header scrolls away, so the footer now says what the
+  header says: `Run N · status` with the start time at the right, then duration, tools (with
+  `(n running)` while live), notes, errors, and the run's tokens.
+- Add per-run tokens to the block: `↑` uncached input, `⚡` cache reads, `↓` output, summed over
+  that run's assistant messages and formatted like the turn bar. Runs in one turn keep separate
+  sums, and a rebuilt session shows the same numbers. A run with no usage yet shows no token
+  segment.
+- Show the error count only when it is not zero, in the error colour.
+- The footer uses `▴` and replaces the "End of run · final response below" and "Run in
+  progress" lines. It still toggles the frame when clicked.
+- Drop the `kept open` and `(ctrl+o)` text from the frame status. Ctrl+O still opens and
+  closes both layers.
+- On narrow terminals the second row wraps between segments, so no count is cut off.
+
 ## [0.2.2] — 2026-10-21
 
 Tested on Pi 0.99.1 and 1.3.0. Requires Node 22.19.0 or newer.

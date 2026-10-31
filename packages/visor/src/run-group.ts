@@ -1,14 +1,16 @@
 import type { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { Container, type Component, type TuiMouseEvent, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { AuxiliaryRunChild, CommentaryRunChild, ToolRunChild, type RunChild } from "./run-child.js";
-import { fitLine, timingParts, type RecordedTiming, type RunTheme, type ThemeSource } from "./run-style.js";
+import { statusParts, type RunStatus, type RunTokens } from "./run-status.js";
+import { fitLine, type RecordedTiming, type RunTheme, type ThemeSource } from "./run-style.js";
 import type { GroupToolPresentation } from "./tool-display.js";
 
 export interface RunMetadata extends RecordedTiming {
   index: number;
   live?: boolean;
   outcome?: "success" | "error" | "interrupted";
-  keptOpen?: boolean;
+  /** Summed over this run's assistant messages; absent until the run has usage. */
+  tokens?: RunTokens;
 }
 export interface ChildRows { child: RunChild; start: number; height: number; width: number }
 interface CachedChild {
@@ -26,6 +28,8 @@ export class RunGroup extends Container {
   private layout: ChildRows[] = [];
   private layoutWidth = 0;
   private parentMouseRows = new Set<number>();
+  /** Framed status block per arrow. Settled runs only; the key holds everything the block reads. */
+  private blocks = new Map<string, { key: string; theme: RunTheme; lines: string[] }>();
   private cascade?: boolean;
   private cascadeKinds = new WeakMap<RunChild, string>();
   private runActive: boolean;
@@ -44,7 +48,6 @@ export class RunGroup extends Container {
   markTouched(): void {
     if (!this.runActive) return;
     this.touched = true;
-    this.metadata.keptOpen = true;
   }
   /** Native Ctrl+O: both layers, with D12's distinct thought-only meaning. */
   setExpanded(expanded: boolean): void {
@@ -71,7 +74,6 @@ export class RunGroup extends Container {
     this.runActive = false;
     this.metadata.live = false;
     if (this.touched || this.counts.errors || this.metadata.outcome === "error" || this.metadata.outcome === "interrupted") {
-      this.metadata.keptOpen = true;
       return;
     }
     this.expanded = false;
@@ -113,15 +115,20 @@ export class RunGroup extends Container {
   }
   override invalidate(): void {
     this.cache = new WeakMap();
+    this.blocks.clear();
     super.invalidate();
   }
   get counts(): { tools: number; notes: number; errors: number; completedTools: number } {
-    return {
-      tools: this.entries.filter((child) => child.kind === "tool").length,
-      notes: this.entries.filter((child) => child.kind === "note").length,
-      errors: this.entries.filter((child) => child.kind === "tool" && child.failed).length,
-      completedTools: this.entries.filter((child) => child.kind === "tool" && child.settled && !child.stopped).length,
-    };
+    const counts = { tools: 0, notes: 0, errors: 0, completedTools: 0 };
+    for (const child of this.entries) {
+      if (child.kind === "note") counts.notes++;
+      else if (child.kind === "tool") {
+        counts.tools++;
+        if (child.failed) counts.errors++;
+        if (child.settled && !child.stopped) counts.completedTools++;
+      }
+    }
+    return counts;
   }
   get childRows(): readonly ChildRows[] { return this.layout; }
   private linesFor(child: RunChild, width: number, theme: RunTheme, frameWidth: number, frame: (line: string) => string): string[] {
@@ -182,19 +189,28 @@ export class RunGroup extends Container {
       : counts.errors ? "error" : this.metadata.outcome ?? "success";
     const status = this.metadata.live ? "Working" : outcome === "interrupted" ? "Interrupted"
       : outcome === "error" ? "Worked · recovered" : "Worked";
+    const running = this.metadata.live ? this.entries.filter((child) => child.kind === "tool" && !child.settled && !child.stopped).length : 0;
     const color = this.metadata.live ? "warning" : outcome === "success" ? "success" : "error";
-    const header = t.fg("accent", this.expanded ? "▾" : "▸") + " " + t.fg(color, "●") + " "
-      + t.fg("text", t.bold(`Run ${this.metadata.index} · ${status}`));
-    const duration = timingParts({ durationMs: this.metadata.durationMs }, true)[0];
-    const timestamp = timingParts({ timestamp: this.metadata.timestamp })[0];
-    const parts = [`${counts.tools} ${counts.tools === 1 ? "tool" : "tools"}`, `${counts.notes} ${counts.notes === 1 ? "note" : "notes"}`, ...(duration ? [duration] : []),
-      `${counts.errors} ${counts.errors === 1 ? "error" : "errors"}` +
-      (outcome === "interrupted" ? ` · stopped after ${counts.completedTools} ${counts.completedTools === 1 ? "tool" : "tools"}` : ""), ...(timestamp ? [timestamp] : [])];
-    const kept = this.metadata.keptOpen || outcome !== "success" ? " · kept open" : "";
-    const meta = t.fg("muted", parts.join(" • ") + kept + " (ctrl+o)");
-    const lines = [border("┌", "┐"), ...wrapTextWithAnsi(header, innerWidth).map(frame)];
-    // Meta keeps its two-cell indent on every wrapped row.
-    lines.push(...wrapTextWithAnsi(meta, Math.max(1, innerWidth - 2)).map((line) => frame("  " + line)));
+    const state: RunStatus = {
+      index: this.metadata.index, label: status, dot: color, timestamp: this.metadata.timestamp, durationMs: this.metadata.durationMs,
+      tools: counts.tools, running, notes: counts.notes, errors: counts.errors,
+      stoppedAfter: outcome === "interrupted" ? counts.completedTools : undefined, tokens: this.metadata.tokens,
+    };
+    // A settled run's block is reused until something it reads changes; live runs always rebuild.
+    const settled = !this.metadata.live;
+    const tokens = state.tokens;
+    const key = settled ? [state.index, status, color, state.timestamp, state.durationMs, state.tools, state.running, state.notes, state.errors,
+      state.stoppedAfter, tokens?.input, tokens?.cache, tokens?.output, innerWidth].join("|") : "";
+    let parts: ReturnType<typeof statusParts> | undefined; // row 2 is built once per render and shared by header and footer
+    const block = (arrow: string): string[] => {
+      const cached = settled ? this.blocks.get(arrow) : undefined;
+      if (cached && cached.key === key && cached.theme === t) return cached.lines;
+      parts ??= statusParts(t, state, innerWidth);
+      const lines = [...parts.first(arrow), ...parts.rest].map(frame);
+      if (settled) this.blocks.set(arrow, { key, theme: t, lines });
+      return lines;
+    };
+    const lines = [border("┌", "┐"), ...block(this.expanded ? "▾" : "▸")];
     for (let row = 0; row < lines.length; row++) this.parentMouseRows.add(row);
     if (this.expanded) {
       this.parentMouseRows.add(lines.length);
@@ -210,8 +226,9 @@ export class RunGroup extends Container {
         previousKind = child.kind;
       }
       this.parentMouseRows.add(lines.length);
-      this.parentMouseRows.add(lines.length + 1);
-      lines.push(border("├", "┤"), frame(t.fg("muted", this.metadata.live ? "Run in progress" : "End of run · final response below")));
+      const footer = block("▴");
+      for (let row = 0; row < footer.length; row++) this.parentMouseRows.add(lines.length + 1 + row);
+      lines.push(border("├", "┤"), ...footer);
     }
     this.parentMouseRows.add(lines.length);
     lines.push(border("└", "┘"));
